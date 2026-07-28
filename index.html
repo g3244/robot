@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>وصلة · دردشة</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style id="tsGateStyle">
+/* =====================================================================
+   NEW FIRST GATE — namespaced entirely under #tsGate so it can never
+   touch style.css's rules (no shared class names, no global :root vars,
+   no re-declared body/reset rules). The old gate (#gate) is left 100%
+   untouched underneath and is simply covered + then hidden once this
+   one is solved.
+   ===================================================================== */
+/* device already passed verification before -> hide both gates instantly,
+   the moment this class is set on <html>, no waiting for the page to
+   finish loading (this rule applies as soon as #gate/#tsGate exist,
+   even if they haven't been parsed into the DOM yet) */
+html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important; }
+#tsGate{
+  --bg:#0a0f1c; --bg-2:#0d1424; --grid-line: rgba(255,255,255,.035);
+  --card-bg: linear-gradient(180deg,#141c30,#101728); --card-border: rgba(255,255,255,.09);
+  --ink:#eceff6; --ink-muted:#8b93a8; --ink-dim:#5b6479;
+  --accent:#f2b134; --accent-ink:#1a1305; --accent-soft: rgba(242,177,52,.14); --accent-2:#5eead4;
+  --success:#4ade80; --success-soft: rgba(74,222,128,.14);
+  --error:#f1594b; --error-soft: rgba(241,89,75,.16);
+  --radius:20px;
+  --font-display:'Space Grotesk',sans-serif; --font-body:'Inter',sans-serif; --font-mono:'JetBrains Mono',monospace;
+
+  position:fixed; inset:0; z-index:1000;
+  display:flex; align-items:center; justify-content:center;
+  padding:20px;
+  background: radial-gradient(1000px 600px at 50% 10%, rgba(20,28,48,.4), transparent), rgba(6,9,16,.55);
+  backdrop-filter: blur(6px);
+  font-family: var(--font-body);
+  color: var(--ink);
+}
+#tsGate *{box-sizing:border-box;}
+.tsg-gate-inner{width:100%; display:flex; justify-content:center; animation: modalIn .32s cubic-bezier(.2,.8,.2,1);}
+.tsg-brand-panel{display:none;}
+.tsg-gate-card{
+  position:relative; width:100%; max-width:440px;
+  background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius);
+  padding:28px 22px 24px;
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset;
+  overflow:hidden;
+}
+.tsg-corner{display:block; position:absolute; width:16px; height:16px; border:2px solid var(--accent); opacity:.7;}
+.tsg-corner.tsg-tl{top:10px; left:10px; border-left:2px solid var(--accent); border-top:2px solid var(--accent); border-right:none; border-bottom:none; border-radius:4px 0 0 0;}
+.tsg-corner.tsg-tr{top:10px; right:10px; border-right:2px solid var(--accent); border-top:2px solid var(--accent); border-left:none; border-bottom:none; border-radius:0 4px 0 0;}
+.tsg-corner.tsg-bl{bottom:10px; left:10px; border-left:2px solid var(--accent); border-bottom:2px solid var(--accent); border-right:none; border-top:none; border-radius:0 0 0 4px;}
+.tsg-corner.tsg-br{bottom:10px; right:10px; border-right:2px solid var(--accent); border-bottom:2px solid var(--accent); border-left:none; border-top:none; border-radius:0 0 4px 0;}
+.tsg-gate-header{position:relative; z-index:1; margin-bottom:18px;}
+.tsg-eyebrow-tag{
+  display:inline-flex; align-items:center; gap:7px;
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent); background:var(--accent-soft); border:1px solid rgba(242,177,52,.35);
+  padding:5px 10px; border-radius:999px; margin-bottom:14px;
+}
+.tsg-gate-header h1{font-family:var(--font-display); font-size:20px; margin:0 0 8px; line-height:1.3; color:var(--ink);}
+.tsg-gate-header p{color:var(--ink-muted); font-size:13.5px; line-height:1.7; margin:0;}
+.tsg-refresh-btn{
+  position:absolute; top:16px; left:16px; z-index:2;
+  width:30px; height:30px; border-radius:8px;
+  background:rgba(255,255,255,.04); border:1px solid var(--card-border);
+  color:var(--ink-muted); display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:.2s;
+}
+.tsg-refresh-btn:hover{color:var(--accent); border-color:rgba(242,177,52,.4); background:var(--accent-soft);}
+.tsg-refresh-btn svg{width:15px; height:15px;}
+#challengeArea2{position:relative; z-index:1;}
+.tsg-code-wrap{
+  background:#0a0f1c; border:1px solid var(--card-border); border-radius:12px;
+  padding:10px; margin-bottom:14px; position:relative;
+}
+.tsg-code-wrap canvas{display:block; width:100%; height:auto; border-radius:8px;}
+.tsg-code-input-row{display:flex; gap:10px;}
+.tsg-code-input{
+  flex:1; min-width:0;
+  background:rgba(255,255,255,.03); border:1.5px solid var(--card-border); border-radius:10px;
+  color:var(--ink); font-family:var(--font-mono); font-size:18px; letter-spacing:.12em; text-align:center;
+  padding:12px 10px; outline:none; transition:.2s;
+}
+.tsg-code-input:focus{border-color:var(--accent); background:rgba(242,177,52,.05);}
+.tsg-verify-btn{
+  background:var(--accent); color:var(--accent-ink); border:none; border-radius:10px;
+  font-family:var(--font-body); font-weight:700; font-size:14px; padding:0 20px;
+  cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.tsg-verify-btn:hover{filter:brightness(1.08); transform:translateY(-1px);}
+.tsg-verify-btn:active{transform:translateY(0);}
+.tsg-target-strip{
+  display:flex; align-items:center; gap:8px; justify-content:center;
+  background:rgba(255,255,255,.03); border:1px solid var(--card-border); border-radius:12px;
+  padding:12px 10px; margin-bottom:14px;
+}
+.tsg-target-strip .tsg-t-item{
+  width:42px; height:42px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,.04); border:1px solid var(--card-border); position:relative;
+}
+.tsg-target-strip .tsg-t-item svg{width:24px; height:24px;}
+.tsg-target-strip .tsg-t-item.tsg-done{border-color:var(--success); box-shadow:0 0 0 2px var(--success-soft);}
+.tsg-target-strip .tsg-arrow{color:var(--ink-dim); font-size:13px;}
+.tsg-img-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px;}
+.tsg-img-tile{
+  aspect-ratio:1/1; border-radius:13px; border:1.5px solid var(--card-border);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  position:relative; transition:transform .15s, border-color .15s, box-shadow .15s;
+}
+.tsg-img-tile svg{width:46%; height:46%;}
+.tsg-img-tile:hover{transform:translateY(-2px); border-color:rgba(255,255,255,.25);}
+.tsg-img-tile.tsg-selected{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);}
+.tsg-img-tile.tsg-selected::after{
+  content: attr(data-order);
+  position:absolute; top:-7px; right:-7px;
+  width:20px; height:20px; border-radius:50%;
+  background:var(--accent); color:var(--accent-ink); font-family:var(--font-mono); font-weight:700; font-size:11px;
+  display:flex; align-items:center; justify-content:center;
+}
+.tsg-img-tile.tsg-disabled{opacity:.4; cursor:not-allowed;}
+.tsg-img-tile.tsg-shake{animation:shake .38s;}
+.tsg-img-verify-row{display:flex; gap:10px;}
+.tsg-clear-btn{
+  background:rgba(255,255,255,.04); color:var(--ink-muted); border:1.5px solid var(--card-border); border-radius:10px;
+  font-family:var(--font-body); font-weight:600; font-size:13px; padding:0 16px;
+  cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.tsg-clear-btn:hover{color:var(--ink); border-color:rgba(255,255,255,.25);}
+#tsGate .tsg-status-row{
+  display:flex; align-items:center; gap:8px; min-height:22px;
+  font-size:13px; font-family:var(--font-mono);
+}
+#tsGate .tsg-status-row.tsg-success{color:var(--success);}
+#tsGate .tsg-status-row.tsg-error{color:var(--error);}
+.tsg-status-icon{width:16px; height:16px; display:inline-flex;}
+#tsGate .tsg-status-row.tsg-success-only{justify-content:center; min-height:34px;}
+.tsg-status-icon.tsg-big-check{width:30px; height:30px;}
+.tsg-hint{color:var(--ink-dim); font-size:11.5px; margin-top:10px; text-align:center;}
+.tsg-progress-row{
+  display:none; align-items:center; gap:10px;
+  margin-top:12px; padding-top:12px; border-top:1px dashed var(--card-border);
+}
+.tsg-progress-row.tsg-show{display:flex;}
+.tsg-progress-segs{display:flex; gap:5px; flex:1;}
+.tsg-progress-seg{
+  height:5px; flex:1; border-radius:3px; background:rgba(255,255,255,.08);
+  transition: background .25s ease;
+}
+.tsg-progress-seg.tsg-filled{background:var(--accent);}
+.tsg-progress-text{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-muted); white-space:nowrap; flex-shrink:0;
+}
+#tsGate .tsg-success-view{
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; padding:26px 10px 10px; position:relative; z-index:1;
+}
+.tsg-success-check{width:88px; height:88px;}
+.tsg-success-check-circle{
+  fill:none; stroke:var(--success); stroke-width:4;
+  stroke-dasharray:227; stroke-dashoffset:227;
+  animation:circleDraw .5s ease forwards;
+}
+.tsg-success-check-mark{
+  fill:none; stroke:var(--success); stroke-width:5.5; stroke-linecap:round; stroke-linejoin:round;
+  stroke-dasharray:53; stroke-dashoffset:53;
+  animation:checkDraw .35s ease forwards .45s;
+}
+.tsg-success-text{
+  font-family:var(--font-display); font-weight:700; font-size:19px; color:var(--success);
+  opacity:0; transform:translateY(4px);
+  animation:textIn .4s ease forwards .78s;
+}
+#tsGate :focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+@media (max-width:400px){
+  .tsg-gate-card{padding:22px 16px 18px;}
+  .tsg-target-strip .tsg-t-item{width:34px; height:34px;}
+  .tsg-code-input{font-size:16px;}
+  .tsg-gate-header h1{font-size:18px;}
+}
+@media (min-width:641px){
+  .tsg-gate-card{max-width:480px; padding:34px 30px 26px;}
+  .tsg-img-grid{gap:12px;}
+}
+@media (min-width:1025px){
+  .tsg-gate-inner{max-width:920px; border-radius:26px; overflow:hidden; box-shadow:0 40px 100px -24px rgba(0,0,0,.75);}
+  .tsg-gate-card{
+    max-width:none; flex:1 1 480px; border-radius:0;
+    box-shadow:none; padding:46px 44px 34px;
+  }
+  .tsg-gate-header h1{font-size:23px;}
+  .tsg-gate-header .tsg-eyebrow-tag{display:none;}
+  .tsg-img-tile:hover{transform:translateY(-3px) scale(1.02);}
+  .tsg-brand-panel{
+    display:flex; flex-direction:column; justify-content:center;
+    flex:1 1 340px; max-width:360px; padding:46px 40px;
+    position:relative; overflow:hidden;
+    background:
+      radial-gradient(420px 320px at 30% 20%, rgba(242,177,52,.14), transparent 70%),
+      linear-gradient(165deg,#0d1424,#0a0f1c);
+    border-left:1px solid var(--card-border);
+  }
+  .tsg-brand-panel::before{
+    content:""; position:absolute; inset:0;
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:34px 34px;
+    mask-image: radial-gradient(320px 260px at 30% 25%, #000 10%, transparent 75%);
+  }
+  .tsg-brand-panel > *{position:relative; z-index:1;}
+  .tsg-brand-panel h2{font-family:var(--font-display); font-size:25px; line-height:1.3; margin:14px 0 12px; color:var(--ink);}
+  .tsg-brand-panel p{color:var(--ink-muted); font-size:14px; line-height:1.75; margin:0 0 22px;}
+  .tsg-brand-features{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:11px;}
+  .tsg-brand-features li{display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink);}
+  .tsg-brand-features .tsg-dot{width:6px; height:6px; border-radius:50%; background:var(--accent); flex-shrink:0;}
+}
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="bg-grid"></div>
+
+<!-- ======================= 0) NEW FIRST GATE (from index2.html) ======================= -->
+<div id="tsGate">
+  <div class="tsg-gate-inner">
+    <div class="tsg-brand-panel">
+      <span class="tsg-eyebrow-tag">Turnstile · تحقق أمني</span>
+      <h2>بوابة تحقق ذكية</h2>
+      <p>اختباران عشوائيان بسيطان يتأكدان أنك إنسان حقيقي قبل ما تكمل تصفح الموقع.</p>
+      <ul class="tsg-brand-features">
+        <li><span class="tsg-dot"></span> رموز عشوائية غير مكررة (حروف كبيرة وصغيرة وأرقام)</li>
+        <li><span class="tsg-dot"></span> ترتيب صور بالضغط ثم التحقق</li>
+        <li><span class="tsg-dot"></span> اختبار جديد تلقائيًا عند أي إجابة خاطئة</li>
+      </ul>
+    </div>
+
+    <div class="tsg-gate-card">
+      <div class="tsg-corner tsg-tl"></div><div class="tsg-corner tsg-tr"></div>
+      <div class="tsg-corner tsg-bl"></div><div class="tsg-corner tsg-br"></div>
+
+      <button class="tsg-refresh-btn" type="button" id="tsRefreshBtn" title="إعادة إنشاء الكود" aria-label="إعادة إنشاء الكود">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+          <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+        </svg>
+      </button>
+
+      <div class="tsg-gate-header">
+        <span class="tsg-eyebrow-tag">Turnstile · تحقق أمني</span>
+        <h1>تأكيد أنك لست روبوتًا</h1>
+        <p id="tsSubText">جاري تجهيز الاختبار...</p>
+      </div>
+
+      <div id="challengeArea2"></div>
+
+      <div class="tsg-status-row" id="statusRow2">
+        <span class="tsg-status-icon" id="tsStatusIcon"></span>
+        <span id="tsStatusText"></span>
+      </div>
+
+      <div class="tsg-progress-row" id="tsProgressRow">
+        <div class="tsg-progress-segs" id="tsProgressSegs"></div>
+        <span class="tsg-progress-text" id="tsProgressText"></span>
+      </div>
+
+      <p class="tsg-hint" id="tsHintText">اختبار عشوائي يتغيّر تلقائيًا عند الإجابة الخاطئة، أو اضغط ⟲ لإعادة إنشاء كود جديد.</p>
+
+      <div class="tsg-success-view" id="successView2">
+        <svg class="tsg-success-check" viewBox="0 0 80 80">
+          <circle class="tsg-success-check-circle" cx="40" cy="40" r="36"/>
+          <path class="tsg-success-check-mark" d="M22 41 34 53 58 27"/>
+        </svg>
+        <p class="tsg-success-text">تم التحقق</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var ICONS = [
+    {id:"sun", color:"#f2b134", svg:'<circle cx="32" cy="32" r="12" fill="none" stroke="currentColor" stroke-width="3.2"/><g stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><line x1="32" y1="6" x2="32" y2="14"/><line x1="32" y1="50" x2="32" y2="58"/><line x1="6" y1="32" x2="14" y2="32"/><line x1="50" y1="32" x2="58" y2="32"/><line x1="13" y1="13" x2="18.5" y2="18.5"/><line x1="45.5" y1="45.5" x2="51" y2="51"/><line x1="13" y1="51" x2="18.5" y2="45.5"/><line x1="45.5" y1="18.5" x2="51" y2="13"/></g>'},
+    {id:"moon", color:"#a5b4fc", svg:'<path d="M40 8a24 24 0 1 0 16 42A20 20 0 0 1 40 8Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/>'},
+    {id:"star", color:"#facc15", svg:'<path d="M32 6 L38.5 24 L58 25 L42.5 37 L48 56 L32 45 L16 56 L21.5 37 L6 25 L25.5 24 Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/>'},
+    {id:"heart", color:"#f472b6", svg:'<path d="M32 54C14 42 6 32 6 21c0-8 6-14 14-14 6 0 10 3 12 8 2-5 6-8 12-8 8 0 14 6 14 14 0 11-8 21-26 33Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/>'},
+    {id:"cloud", color:"#93c5fd", svg:'<path d="M18 42a11 11 0 0 1-1-22 14 14 0 0 1 27-4 12 12 0 0 1 2 23.8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 42h27" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>'},
+    {id:"umbrella", color:"#5eead4", svg:'<path d="M6 30a26 26 0 0 1 52 0Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><line x1="32" y1="30" x2="32" y2="52" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M32 52a6 6 0 0 1-9-3" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>'},
+    {id:"tree", color:"#4ade80", svg:'<path d="M32 6 20 24h6L14 40h9L14 54h36l-9-14h9L38 24h6Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><line x1="32" y1="54" x2="32" y2="60" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'},
+    {id:"flower", color:"#fb923c", svg:'<g fill="none" stroke="currentColor" stroke-width="3"><circle cx="32" cy="20" r="8"/><circle cx="20" cy="32" r="8"/><circle cx="44" cy="32" r="8"/><circle cx="32" cy="44" r="8"/><circle cx="32" cy="32" r="6" fill="currentColor" stroke="none"/></g><line x1="32" y1="50" x2="32" y2="60" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'},
+    {id:"fish", color:"#38bdf8", svg:'<path d="M8 32c8-12 24-16 34-10 6 4 10 8 14 4-2 8-2 12 0 20-4-4-8 0-14 4-10 6-26 2-34-10Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><circle cx="20" cy="30" r="2" fill="currentColor"/>'},
+    {id:"house", color:"#f59e0b", svg:'<path d="M10 30 32 10l22 20" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 26v28h36V26" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><rect x="27" y="38" width="10" height="16" fill="none" stroke="currentColor" stroke-width="3"/>'},
+    {id:"cat", color:"#c4b5fd", svg:'<path d="M16 20 10 8l14 8Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M48 20 54 8 40 16Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><circle cx="32" cy="32" r="20" fill="none" stroke="currentColor" stroke-width="3.2"/><circle cx="25" cy="30" r="2" fill="currentColor"/><circle cx="39" cy="30" r="2" fill="currentColor"/><path d="M28 38q4 3 8 0" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>'},
+    {id:"balloon", color:"#fb7185", svg:'<ellipse cx="32" cy="22" rx="16" ry="18" fill="none" stroke="currentColor" stroke-width="3.2"/><path d="M32 40 27 46l5 3 5-3Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><line x1="32" y1="49" x2="32" y2="60" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>'},
+    {id:"key", color:"#fde047", svg:'<circle cx="20" cy="32" r="12" fill="none" stroke="currentColor" stroke-width="3.2"/><line x1="30" y1="32" x2="56" y2="32" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><line x1="46" y1="32" x2="46" y2="42" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><line x1="54" y1="32" x2="54" y2="40" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>'},
+    {id:"bell", color:"#fbbf24", svg:'<path d="M32 8a6 6 0 0 0-6 6v2c-8 3-12 10-12 20l-4 8h44l-4-8c0-10-4-17-12-20v-2a6 6 0 0 0-6-6Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M26 48a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'},
+    {id:"cup", color:"#f97316", svg:'<path d="M14 14h30v20a15 15 0 0 1-30 0Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><path d="M44 20h6a8 8 0 0 1 0 16h-6" fill="none" stroke="currentColor" stroke-width="3.2"/><line x1="10" y1="54" x2="48" y2="54" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>'},
+    {id:"kite", color:"#22d3ee", svg:'<path d="M32 6 54 28 32 58 10 28Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><line x1="10" y1="28" x2="54" y2="28" stroke="currentColor" stroke-width="2.4"/><path d="M32 58q3 4 0 8t-4 3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>'},
+    {id:"boat", color:"#60a5fa", svg:'<path d="M8 40h48l-6 12H14Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><line x1="32" y1="8" x2="32" y2="40" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M32 10 48 38H32Z" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linejoin="round"/>'},
+    {id:"butterfly", color:"#e879f9", svg:'<path d="M32 16C24 4 8 8 8 22c0 10 12 14 24 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M32 16c8-12 24-8 24 6 0 10-12 14-24 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M32 48C24 58 8 54 8 42c0-9 12-13 24-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M32 48c8 10 24 6 24-6 0-9-12-13-24-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><line x1="32" y1="10" x2="32" y2="54" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>'},
+    {id:"apple", color:"#f87171", svg:'<path d="M32 20c8-8 20-4 20 8 0 16-12 28-20 28S12 44 12 28c0-12 12-16 20-8Z" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><path d="M32 20V10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M32 12q6-6 12-2" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>'}
+  ];
+
+  var currentType = null;
+  var expectedCode = "";
+  var imgOrder = [];
+
+  /* ---- device already verified before? skip the whole gate ---- */
+  var VERIFIED_KEY = "wasla_device_verified";
+  var alreadyVerified = false;
+  try { alreadyVerified = localStorage.getItem(VERIFIED_KEY) === "1"; } catch(e){}
+
+  if(alreadyVerified){
+    // hides #tsGate and #gate INSTANTLY via CSS (see html.wasla-verified rule
+    // above) — no need to wait for the page to finish loading
+    document.documentElement.classList.add("wasla-verified");
+    // onGateSuccess only exists once script.js (further down the page) has
+    // run, so that specific call still has to wait — but nothing visual does
+    document.addEventListener("DOMContentLoaded", function(){
+      if(typeof onGateSuccess === "function") onGateSuccess();
+    });
+    return;
+  }
+
+  var gate = document.getElementById("tsGate");
+  var gateHeader = document.querySelector("#tsGate .tsg-gate-header");
+  var challengeArea = document.getElementById("challengeArea2");
+  var subText = document.getElementById("tsSubText");
+  var statusRow = document.getElementById("statusRow2");
+  var statusIcon = document.getElementById("tsStatusIcon");
+  var statusText = document.getElementById("tsStatusText");
+  var refreshBtn = document.getElementById("tsRefreshBtn");
+  var hintText = document.getElementById("tsHintText");
+  var successView = document.getElementById("successView2");
+  var progressRow = document.getElementById("tsProgressRow");
+  var progressSegs = document.getElementById("tsProgressSegs");
+  var progressText = document.getElementById("tsProgressText");
+
+  var LEVEL_KEY = "ts_gate_required_level";
+  var MAX_LEVEL = 4;
+  var requiredLevel = 1;
+  try {
+    var storedLevel = parseInt(localStorage.getItem(LEVEL_KEY), 10);
+    if(!isNaN(storedLevel) && storedLevel >= 1 && storedLevel <= MAX_LEVEL) requiredLevel = storedLevel;
+  } catch(e){ /* localStorage غير متاح - يبدأ من مستوى 1 */ }
+  var streak = 0;
+
+  function saveLevel(){
+    try { localStorage.setItem(LEVEL_KEY, String(requiredLevel)); } catch(e){}
+  }
+
+  function updateProgress(){
+    if(requiredLevel <= 1){
+      progressRow.classList.remove("tsg-show");
+      progressSegs.innerHTML = "";
+      progressText.textContent = "";
+      return;
+    }
+    progressRow.classList.add("tsg-show");
+    var segsHtml = "";
+    for(var i=0; i<requiredLevel; i++){
+      segsHtml += '<span class="tsg-progress-seg' + (i < streak ? " tsg-filled" : "") + '"></span>';
+    }
+    progressSegs.innerHTML = segsHtml;
+    progressText.textContent = streak + " / " + requiredLevel;
+  }
+
+  function setPartialSuccess(msg){
+    statusRow.className = "tsg-status-row tsg-success";
+    statusIcon.className = "tsg-status-icon";
+    statusIcon.innerHTML = ICON_OK;
+    statusText.textContent = msg;
+  }
+
+  function handleCorrect(){
+    streak++;
+    if(streak >= requiredLevel){
+      requiredLevel = 1;
+      streak = 0;
+      saveLevel();
+      updateProgress();
+      setSuccess();
+      succeed();
+    } else {
+      updateProgress();
+      setPartialSuccess("إجابة صحيحة \u2713 — باقي اختبار إضافي (" + streak + " / " + requiredLevel + ")");
+      setTimeout(function(){ newChallenge(); }, 750);
+    }
+  }
+
+  function handleWrong(msg, type){
+    requiredLevel = Math.min(MAX_LEVEL, requiredLevel + 1);
+    streak = 0;
+    saveLevel();
+    updateProgress();
+    setError(msg);
+    setTimeout(function(){ newChallenge(type); }, 700);
+  }
+
+  var ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  var ICON_ERR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+  function clearStatus(){
+    statusRow.className = "tsg-status-row";
+    statusIcon.className = "tsg-status-icon";
+    statusIcon.innerHTML = "";
+    statusText.textContent = "";
+  }
+  function setError(msg){
+    statusRow.className = "tsg-status-row tsg-error";
+    statusIcon.className = "tsg-status-icon";
+    statusIcon.innerHTML = ICON_ERR;
+    statusText.textContent = msg;
+  }
+  function setSuccess(){
+    statusRow.className = "tsg-status-row tsg-success tsg-success-only";
+    statusIcon.className = "tsg-status-icon tsg-big-check";
+    statusIcon.innerHTML = ICON_OK;
+    statusText.textContent = "";
+  }
+
+  function shuffle(arr){
+    var a = arr.slice();
+    for(var i=a.length-1;i>0;i--){
+      var j = Math.floor(Math.random()*(i+1));
+      var t=a[i]; a[i]=a[j]; a[j]=t;
+    }
+    return a;
+  }
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+  function newChallenge(forceType){
+    currentType = forceType || (Math.random() < 0.5 ? "text" : "image");
+    clearStatus();
+    challengeArea.innerHTML = "";
+    if(currentType === "text"){
+      subText.textContent = "اكتب الرموز الظاهرة في الصورة أدناه (حروف كبيرة وصغيرة وأرقام).";
+      buildTextChallenge();
+    } else {
+      subText.textContent = "اختر الصور بنفس الترتيب الموضّح في الأعلى، ثم اضغط تحقق.";
+      buildImageChallenge();
+    }
+  }
+
+  function generateCode(){
+    var upper = "ABCDEFGHJKMNPQRSTUVWXYZ";
+    var lower = "abcdefghjkmnpqrstuvwxyz";
+    var digits = "23456789";
+    var all = upper + lower + digits;
+    var code, tries = 0;
+    do {
+      var pool = shuffle(all.split(""));
+      var chosen = [];
+      var used = {};
+      for(var i=0;i<pool.length && chosen.length<6;i++){
+        if(!used[pool[i]]){ used[pool[i]]=true; chosen.push(pool[i]); }
+      }
+      code = chosen.join("");
+      tries++;
+    } while(tries < 25 && !(/[A-Z]/.test(code) && /[a-z]/.test(code) && /[0-9]/.test(code)));
+    return code;
+  }
+
+  function buildTextChallenge(){
+    expectedCode = generateCode();
+
+    var wrap = document.createElement("div");
+    wrap.className = "tsg-code-wrap";
+    var canvas = document.createElement("canvas");
+    canvas.width = 340; canvas.height = 108;
+    wrap.appendChild(canvas);
+    challengeArea.appendChild(wrap);
+    drawCode(canvas, expectedCode);
+
+    var row = document.createElement("div");
+    row.className = "tsg-code-input-row";
+    row.innerHTML =
+      '<input type="text" class="tsg-code-input" id="tsCodeInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="------" maxlength="6">' +
+      '<button class="tsg-verify-btn" type="button" id="tsVerifyBtn">تحقق</button>';
+    challengeArea.appendChild(row);
+
+    var input = document.getElementById("tsCodeInput");
+    var btn = document.getElementById("tsVerifyBtn");
+    input.focus();
+    input.addEventListener("keydown", function(e){ if(e.key === "Enter") btn.click(); });
+    btn.addEventListener("click", function(){
+      if(input.value.trim() === expectedCode){
+        handleCorrect();
+      } else {
+        input.style.borderColor = "var(--error)";
+        handleWrong("الرموز غير صحيحة، يتم تجهيز اختبار جديد...", "text");
+      }
+    });
+  }
+
+  function drawCode(canvas, code){
+    var ctx = canvas.getContext("2d");
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+
+    var grad = ctx.createLinearGradient(0,0,w,h);
+    grad.addColorStop(0, "#0c1220");
+    grad.addColorStop(1, "#111a2e");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,w,h);
+
+    for(var i=0;i<6;i++){
+      ctx.strokeStyle = "rgba(255,255,255," + (0.04 + Math.random()*0.05) + ")";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.random()*w, Math.random()*h);
+      ctx.bezierCurveTo(Math.random()*w, Math.random()*h, Math.random()*w, Math.random()*h, Math.random()*w, Math.random()*h);
+      ctx.stroke();
+    }
+    for(var d=0; d<40; d++){
+      ctx.fillStyle = "rgba(255,255,255," + (0.03 + Math.random()*0.06) + ")";
+      ctx.beginPath();
+      ctx.arc(Math.random()*w, Math.random()*h, Math.random()*1.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    var colors = ["#f2b134", "#5eead4", "#f472b6", "#93c5fd", "#4ade80", "#fb923c"];
+    var n = code.length;
+    var slot = w / n;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    for(var idx=0; idx<n; idx++){
+      var ch = code[idx];
+      var cx = slot*idx + slot/2 + (Math.random()*6-3);
+      var cy = h/2 + (Math.random()*14-7);
+      var angle = (Math.random()*32-16) * Math.PI/180;
+      var size = 34 + Math.random()*8;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.font = "700 " + size + "px 'JetBrains Mono', monospace";
+      ctx.fillStyle = colors[idx % colors.length];
+      ctx.shadowColor = "rgba(0,0,0,.4)";
+      ctx.shadowBlur = 2;
+      ctx.fillText(ch, 0, 2);
+      ctx.restore();
+    }
+    ctx.strokeStyle = "rgba(242,177,52,.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, h*0.5); ctx.lineTo(w, h*0.5); ctx.stroke();
+  }
+
+  var imgSelection = [];
+
+  function buildImageChallenge(){
+    var chosen = shuffle(ICONS).slice(0,6);
+    var target = shuffle(chosen).slice(0,4);
+    imgOrder = target.map(function(i){ return i.id; });
+    imgSelection = [];
+
+    var strip = document.createElement("div");
+    strip.className = "tsg-target-strip";
+    target.forEach(function(icon, i){
+      if(i>0){
+        var arrow = document.createElement("span");
+        arrow.className = "tsg-arrow";
+        arrow.textContent = "←";
+        strip.appendChild(arrow);
+      }
+      var item = document.createElement("div");
+      item.className = "tsg-t-item";
+      item.style.color = icon.color;
+      item.innerHTML = '<svg viewBox="0 0 64 64">' + icon.svg + '</svg>';
+      strip.appendChild(item);
+    });
+    challengeArea.appendChild(strip);
+
+    var grid = document.createElement("div");
+    grid.className = "tsg-img-grid";
+    var gridIcons = shuffle(chosen);
+    gridIcons.forEach(function(icon){
+      var tile = document.createElement("div");
+      tile.className = "tsg-img-tile";
+      tile.dataset.id = icon.id;
+      tile.style.color = icon.color;
+      tile.style.background = "rgba(255,255,255,.03)";
+      tile.innerHTML = '<svg viewBox="0 0 64 64">' + icon.svg + '</svg>';
+      tile.addEventListener("click", function(){ toggleTile(tile); });
+      grid.appendChild(tile);
+    });
+    challengeArea.appendChild(grid);
+
+    var row = document.createElement("div");
+    row.className = "tsg-img-verify-row";
+    row.innerHTML =
+      '<button class="tsg-clear-btn" type="button" id="tsClearBtn">مسح</button>' +
+      '<button class="tsg-verify-btn" type="button" id="tsImgVerifyBtn" style="flex:1">تحقق</button>';
+    challengeArea.appendChild(row);
+
+    document.getElementById("tsImgVerifyBtn").addEventListener("click", verifyImageSelection);
+    document.getElementById("tsClearBtn").addEventListener("click", clearImageSelection);
+  }
+
+  function toggleTile(tile){
+    var id = tile.dataset.id;
+    var idx = imgSelection.indexOf(id);
+    if(idx !== -1){
+      imgSelection.splice(idx,1);
+      refreshTileBadges();
+      return;
+    }
+    if(imgSelection.length >= imgOrder.length) return;
+    imgSelection.push(id);
+    tile.classList.add("tsg-selected");
+    tile.dataset.order = imgSelection.length;
+    clearStatus();
+  }
+
+  function refreshTileBadges(){
+    var tiles = challengeArea.querySelectorAll(".tsg-img-tile");
+    tiles.forEach(function(t){
+      var pos = imgSelection.indexOf(t.dataset.id);
+      if(pos === -1){
+        t.classList.remove("tsg-selected");
+        t.removeAttribute("data-order");
+      } else {
+        t.classList.add("tsg-selected");
+        t.dataset.order = pos+1;
+      }
+    });
+  }
+
+  function clearImageSelection(){
+    imgSelection = [];
+    refreshTileBadges();
+    clearStatus();
+  }
+
+  function verifyImageSelection(){
+    if(imgSelection.length < imgOrder.length){
+      setError("اختر " + imgOrder.length + " صور أولًا بنفس الترتيب المطلوب");
+      return;
+    }
+    var correct = imgSelection.every(function(id, i){ return id === imgOrder[i]; });
+    if(correct){
+      handleCorrect();
+    } else {
+      challengeArea.querySelectorAll(".tsg-img-tile.tsg-selected").forEach(function(t){ t.classList.add("tsg-shake"); });
+      handleWrong("ترتيب خاطئ، يتم تجهيز اختبار جديد...", "image");
+    }
+  }
+
+  /* ===================== success -> hand off to the site's real flow ===================== */
+  function succeed(){
+    setTimeout(function(){
+      gateHeader.style.display = "none";
+      challengeArea.style.display = "none";
+      statusRow.style.display = "none";
+      progressRow.style.display = "none";
+      hintText.style.display = "none";
+      refreshBtn.style.display = "none";
+      successView.style.display = "flex";
+    }, 280);
+    setTimeout(function(){
+      // remember this device so the gate never shows again on it
+      try { localStorage.setItem(VERIFIED_KEY, "1"); } catch(e){}
+      // hide this new gate
+      gate.classList.add("hidden");
+      // also hide the site's original gate underneath (never touched/modified,
+      // just no longer needed once this one is solved)
+      var oldGate = document.getElementById("gate");
+      if(oldGate) oldGate.classList.add("hidden");
+      // continue into the site exactly like the original gate used to
+      if(typeof onGateSuccess === "function") onGateSuccess();
+    }, 1500);
+  }
+
+  refreshBtn.addEventListener("click", function(){ newChallenge(currentType); });
+
+  updateProgress();
+  newChallenge();
+})();
+</script>
+
+<!-- ======================= 1) GATE: MULTI-CHALLENGE VERIFICATION ======================= -->
+<section id="gate" class="gate">
+  <div class="gate-inner">
+    <div class="gate-shell">
+
+      <!-- Desktop-only descriptive side panel -->
+      <aside class="gate-side" id="gateSide">
+        <span class="gate-side-glow"></span>
+        <span class="eyebrow-tag">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 6v6c0 5 4 9 9 10 5-1 9-5 9-10V6l-9-4Z"/></svg>
+          تحقق أمني
+        </span>
+        <h2>ليه بنسألك السؤال ده؟</h2>
+        <p>وصلة بتستخدم نظام تحقق ذكي بيتغيّر شكله كل مرة، عشان يمنع أي حساب أو برنامج آلي يدخل مكانك، ويضمن إن اللي هيدردش مع صحابك هو إنت فعلاً.</p>
+        <ul class="gate-feature-list">
+          <li>
+            <span class="gate-feature-icon">🔤</span>
+            <div><strong>كود بصري</strong><span>حروف وأرقام بتتغيّر كل مرة</span></div>
+          </li>
+          <li>
+            <span class="gate-feature-icon">◆</span>
+            <div><strong>ترتيب الأشكال</strong><span>ذاكرة قصيرة وترتيب صحيح</span></div>
+          </li>
+          <li>
+            <span class="gate-feature-icon">▦</span>
+            <div><strong>تركيب القطعة</strong><span>اسحبها لمكانها المنقط</span></div>
+          </li>
+        </ul>
+        <div class="gate-side-note">كل اختبار بيتولّد عشوائي، ولو غلطت هيطلب منك تحل أكتر من مرة عشان يتأكد إنك مش روبوت.</div>
+      </aside>
+
+      <!-- The actual challenge card -->
+      <div class="gate-card" id="gateCard">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+
+        <div class="gate-header" id="gateHeader">
+          <span class="eyebrow-tag">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 6v6c0 5 4 9 9 10 5-1 9-5 9-10V6l-9-4Z"/></svg>
+            تحقق أمني
+          </span>
+          <h1 id="gateTitle">قبل ما تدخل، تأكد إنك مش روبوت</h1>
+          <p id="gateSubtitle">حل الاختبار اللي تحت عشان تفتح الدردشة</p>
+        </div>
+
+        <div id="challengeArea"></div>
+
+        <div class="status-row" id="statusRow"></div>
+
+        <div class="gate-progress" id="gateProgress">
+          <div class="gate-progress-track"><div class="gate-progress-fill" id="gateProgressFill"></div></div>
+          <span class="gate-progress-label" id="gateProgressLabel">0 / 1</span>
+        </div>
+
+        <div class="success-view" id="successView">
+          <svg class="success-check" viewBox="0 0 90 90">
+            <circle class="success-check-circle" cx="45" cy="45" r="36"/>
+            <path class="success-check-mark" d="M28 46l12 12 22-24"/>
+          </svg>
+          <div class="success-text">تم التحقق بنجاح</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 2) REGISTRATION SCREEN ======================= -->
+<section id="authScreen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <span class="logo-dot"></span> وصلة
+    </div>
+
+    <div class="auth-tabs" id="authTabs">
+      <button type="button" class="auth-tab-btn active" data-auth-tab="register">حساب جديد</button>
+      <button type="button" class="auth-tab-btn" data-auth-tab="login">تسجيل الدخول</button>
+    </div>
+
+    <!-- ---- Register pane ---- -->
+    <div class="auth-pane active" id="authPane-register">
+      <h1>خلّينا نعرفك بيك</h1>
+      <p class="auth-sub">الاسم وكلمة السر مطلوبين، الصورة والنبذة اختياريين. هيتولّد لك رقم تعريف خاص بيك تقدر تدخل بيه تاني بنفس كلمة السر.</p>
+
+      <div class="avatar-picker">
+        <div class="avatar-preview" id="avatarPreview">
+          <span id="avatarInitial">؟</span>
+          <img id="avatarImg" alt="" class="hidden">
+        </div>
+        <label class="avatar-upload-btn" for="avatarInput">اختر صورة (اختياري)</label>
+        <input type="file" id="avatarInput" accept="image/*" class="hidden">
+      </div>
+
+      <div class="field field-name">
+        <label for="nameInput">الاسم <span class="req">*</span></label>
+        <input type="text" id="nameInput" maxlength="30" placeholder="اكتب اسمك هنا" autocomplete="name">
+      </div>
+
+      <div class="field field-bio">
+        <label for="bioInput">نبذة عنك (اختياري)</label>
+        <textarea id="bioInput" maxlength="120" placeholder="اكتب حاجة قصيرة عن نفسك..."></textarea>
+      </div>
+
+      <div class="field field-password">
+        <label for="passwordInput">كلمة السر <span class="req">*</span></label>
+        <div class="password-input-wrap">
+          <input type="password" id="passwordInput" placeholder="6 أحرف على الأقل" autocomplete="new-password" dir="ltr">
+          <button type="button" class="password-toggle" data-target="passwordInput" aria-label="إظهار كلمة السر">
+            <svg class="eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.4 19.4 0 0 1 5.06-5.94M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <button class="primary-btn" id="registerBtn">ابدأ الدردشة</button>
+    </div>
+
+    <!-- ---- Login pane ---- -->
+    <div class="auth-pane" id="authPane-login">
+      <h1>أهلاً بيك تاني</h1>
+      <p class="auth-sub">سجّل دخولك برقمك التعريفي وكلمة السر اللي اتسجّلت بيها، وهتلاقي نفس حسابك وأصحابك.</p>
+
+      <div class="field">
+        <label for="loginIdInput">رقم التعريف (11 رقم) <span class="req">*</span></label>
+        <input type="text" id="loginIdInput" maxlength="11" inputmode="numeric" placeholder="01234567891" dir="ltr">
+      </div>
+
+      <div class="field">
+        <label for="loginPasswordInput">كلمة السر <span class="req">*</span></label>
+        <div class="password-input-wrap">
+          <input type="password" id="loginPasswordInput" autocomplete="new-password" dir="ltr">
+          <button type="button" class="password-toggle" data-target="loginPasswordInput" aria-label="إظهار كلمة السر">
+            <svg class="eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.4 19.4 0 0 1 5.06-5.94M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <button class="primary-btn" id="loginBtn">دخول</button>
+    </div>
+
+    <p class="auth-error" id="authError"></p>
+  </div>
+</section>
+
+<!-- ======================= 3) CHAT APP ======================= -->
+<section id="app" class="app hidden">
+
+  <!-- ---- Sidebar ---- -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="me" id="openMyProfile">
+        <div class="avatar sm" id="myAvatar"><span id="myAvatarInitial">؟</span><img class="hidden"></div>
+        <div class="me-info">
+          <strong id="myName">—</strong>
+          <span class="my-id" id="myIdDisplay">ID: —</span>
+        </div>
+      </div>
+      <div class="sidebar-actions">
+        <button class="icon-btn" id="copyIdBtn" title="نسخ الرقم التعريفي">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <button class="icon-btn" id="openFriends" title="الأصدقاء">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
+        <button class="settings-launcher" id="openSettings">
+          <span class="settings-launcher-ring"></span>
+          <span class="settings-launcher-label">الإعدادات</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ---- chat-list selection toolbar: appears on a phone long-press
+         instead of a dropdown menu — just cancel / count / block / delete,
+         nothing else ---- -->
+    <div class="selection-toolbar hidden" id="chatListSelectionToolbar">
+      <button type="button" id="chatListSelectionCancelBtn" title="إلغاء التحديد">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+      <span class="selection-count" id="chatListSelectionCount">1</span>
+      <div class="selection-actions">
+        <button type="button" class="icon-btn danger" id="chatListSelectionBlockBtn" title="حظر الشخص">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+        </button>
+        <button type="button" class="icon-btn danger" id="chatListSelectionDeleteBtn" title="حذف الشات">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="search-box">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="searchIdInput" placeholder="ابحث برقم التعريف (11 رقم)" maxlength="11" inputmode="numeric">
+      <button id="searchIdBtn">بحث</button>
+    </div>
+    <div class="search-result hidden" id="searchResult"></div>
+
+    <div class="chat-list" id="chatList">
+      <div class="empty-state" id="chatListEmpty">
+        <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <p>لسه معندكش أي محادثات.<br>ابحث برقم تعريف صاحبك وابدأ الدردشة</p>
+      </div>
+    </div>
+
+    <!-- ---- Floating circular shortcut to Wasla AI, sits over the chat list ---- -->
+    <button type="button" class="ai-float-btn" id="openAiChatFloatBtn" title="Wasla AI">
+      <span class="logo-dot"></span>
+      <span class="ai-float-badge hidden" id="aiFloatBadge"></span>
+    </button>
+  </aside>
+
+  <!-- ---- Main chat window ---- -->
+  <main class="chat-window" id="chatWindow">
+    <div class="chat-placeholder" id="chatPlaceholder">
+      <span class="logo-dot big"></span>
+      <h2>وصلة</h2>
+      <p>اختار محادثة من القايمة أو ابحث برقم تعريف عشان تبدأ</p>
+    </div>
+
+    <div class="chat-active hidden" id="chatActive">
+      <header class="chat-header">
+        <button class="back-btn" id="backBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <button type="button" class="peer-info-trigger" id="peerProfileTrigger" title="عرض الملف الشخصي">
+          <div class="avatar sm" id="peerAvatar"><span></span><img class="hidden"></div>
+          <div class="peer-info">
+            <strong id="peerName">—</strong>
+            <span id="peerId">—</span>
+            <span id="peerStatus" class="peer-status hidden"></span>
+          </div>
+        </button>
+        <button class="icon-btn danger" id="deleteChatBtn" title="حذف الشات (الشخص هيفضل محفوظ)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+        </button>
+        <button class="icon-btn danger" id="blockBtn" title="حظر المستخدم">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+        </button>
+      </header>
+
+      <!-- ---- selection-mode toolbar: replaces the header on touch devices
+           after a long-press, instead of the small popup menu ---- -->
+      <header class="selection-toolbar hidden" id="selectionToolbar">
+        <button type="button" class="icon-btn" id="selectionCancelBtn" title="إلغاء التحديد">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <span class="selection-count" id="selectionCount">1</span>
+        <div class="selection-actions">
+          <button type="button" class="icon-btn" id="selectionReplyBtn" title="رد">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17 4 12l5-5"/><path d="M4 12h10a6 6 0 0 1 6 6v1"/></svg>
+          </button>
+          <button type="button" class="icon-btn danger" id="selectionDeleteBtn" title="حذف">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          </button>
+          <button type="button" class="icon-btn" id="selectionMoreBtn" title="المزيد">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="pinned-banner hidden" id="pinnedBanner">
+        <span class="pinned-banner-icon">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1z"/></svg>
+        </span>
+        <div class="pinned-banner-body">
+          <strong>رسالة مثبتة:</strong>
+          <span id="pinnedBannerText">—</span>
+        </div>
+        <div class="pinned-banner-dashes hidden" id="pinnedBannerDashes"></div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="block-banner hidden" id="blockBanner"></div>
+
+      <div class="reply-preview hidden" id="replyPreview">
+        <span class="reply-preview-accent"></span>
+        <div class="reply-preview-body">
+          <strong id="replyPreviewName">—</strong>
+          <span id="replyPreviewText">—</span>
+        </div>
+        <button type="button" class="icon-btn" id="cancelReplyBtn" title="إلغاء الرد">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="deleted-for-me-bar hidden" id="deletedForMeBar">
+        <span>الرسالة اتمسحت من عندك</span>
+        <button type="button" id="undoDeleteForMeBtn">تراجع</button>
+      </div>
+
+      <form class="composer" id="composer">
+        <!-- ---- floating "jump to latest" button — sits right above the
+             composer bar (right side), fades in only once you've scrolled
+             up away from the bottom of the chat ---- -->
+        <button type="button" class="scroll-to-bottom-btn hidden" id="scrollToBottomBtn" title="روح لآخر الشات">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="m5 13 7 7 7-7"/></svg>
+        </button>
+        <div class="composer-pill">
+          <button type="button" class="composer-icon-btn" id="emojiBtn" title="إيموجي">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/></svg>
+          </button>
+          <textarea id="messageInput" placeholder="اكتب رسالة..." rows="1"></textarea>
+          <button type="button" class="composer-icon-btn" id="attachBtn" title="إرفاق ملف">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+        </div>
+
+        <!-- ---- Voice-note recording bar — swaps in for .composer-pill the
+             moment recording starts (see #composer.is-recording in style.css /
+             the voice-recording block in script.js). The × here is the
+             explicit cancel action; on phone it also visually "arms" once
+             you slide up past the threshold, on desktop it's just always
+             a normal click target. ---- -->
+        <div class="recording-bar" id="recordingBar">
+          <button type="button" class="voice-cancel-btn" id="voiceCancelBtn" title="إلغاء التسجيل">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+          <span class="recording-dot"></span>
+          <span class="recording-timer" id="recordingTimer">0:00</span>
+          <span class="recording-hint" id="recordingHint">اسحب لأعلى أو دوس × للإلغاء</span>
+        </div>
+
+        <button type="submit" id="sendBtn" title="إرسال">
+          <span class="send-icon send-icon-mic">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </span>
+          <span class="send-icon send-icon-send">
+            <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
+          </span>
+          <span class="send-icon send-icon-check">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </span>
+        </button>
+      </form>
+
+      <!-- ---- Emoji picker: bottom sheet on phone/tablet (hides the
+           keyboard while open), floating popover on desktop ---- -->
+      <div class="emoji-panel" id="emojiPanel">
+        <div class="emoji-panel-handle" id="emojiPanelHandle"></div>
+        <div class="emoji-panel-search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="emojiSearchInput" placeholder="بحث عن إيموجي" autocomplete="off">
+        </div>
+        <div class="emoji-panel-tabs" id="emojiPanelTabs"></div>
+        <div class="emoji-panel-body" id="emojiPanelBody"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ---- Settings panel (custom-built, not a generic gear icon) ---- -->
+  <div class="settings-overlay hidden" id="settingsOverlay">
+    <div class="settings-panel">
+      <div class="settings-top">
+        <h2>الإعدادات</h2>
+        <button class="icon-btn" id="closeSettings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <nav class="settings-tabs" id="settingsTabs">
+        <button class="tab-btn active" data-tab="profile">الملف الشخصي</button>
+        <button class="tab-btn" data-tab="appearance">المظهر</button>
+        <button class="tab-btn" data-tab="wallpaper">خلفية الدردشة</button>
+        <button class="tab-btn" data-tab="privacy">الحظر والخصوصية</button>
+      </nav>
+
+      <div class="settings-body">
+
+        <div class="settings-pane active" id="pane-profile">
+          <div class="avatar-picker">
+            <div class="avatar-preview" id="settingsAvatarPreview">
+              <span id="settingsAvatarInitial">؟</span>
+              <img id="settingsAvatarImg" alt="" class="hidden">
+            </div>
+            <label class="avatar-upload-btn" for="settingsAvatarInput">تغيير الصورة</label>
+            <input type="file" id="settingsAvatarInput" accept="image/*" class="hidden">
+          </div>
+          <div class="field">
+            <label>الاسم</label>
+            <input type="text" id="settingsNameInput" maxlength="30">
+          </div>
+          <div class="field">
+            <label>نبذة عنك</label>
+            <textarea id="settingsBioInput" maxlength="120"></textarea>
+          </div>
+          <div class="field">
+            <label>رقمك التعريفي</label>
+            <div class="id-chip"><span id="settingsIdText">—</span>
+              <button id="settingsCopyId">نسخ</button>
+            </div>
+          </div>
+          <button class="primary-btn" id="saveProfileBtn">حفظ التغييرات</button>
+          <p class="auth-error" id="settingsProfileMsg"></p>
+          <button class="secondary-btn logout-btn" id="logoutBtn" type="button">تسجيل الخروج</button>
+          <button class="secondary-btn danger-btn delete-account-btn" id="deleteAccountBtn" type="button">حذف الحساب نهائيًا</button>
+        </div>
+
+        <div class="settings-pane" id="pane-appearance">
+          <h3>وضع العرض</h3>
+          <div class="theme-toggle-row">
+            <button class="theme-opt" data-theme-choice="light">
+              <span class="theme-swatch light"></span> فاتح
+            </button>
+            <button class="theme-opt" data-theme-choice="dark">
+              <span class="theme-swatch dark"></span> غامق
+            </button>
+          </div>
+
+          <h3>لون الدردشة</h3>
+          <div class="color-grid" id="colorGrid"></div>
+          <div class="custom-color-row">
+            <label for="customColorInput" class="custom-color-label">
+              <span class="custom-color-swatch" id="customColorSwatch"></span>
+              اختار لون بإيدك
+            </label>
+            <input type="color" id="customColorInput" value="#f2b134">
+          </div>
+        </div>
+
+        <div class="settings-pane" id="pane-wallpaper">
+          <h3>خلفية الدردشة</h3>
+          <div class="wallpaper-grid" id="wallpaperGrid"></div>
+          <label class="secondary-btn upload-wallpaper" for="wallpaperInput">رفع خلفية من عندك</label>
+          <input type="file" id="wallpaperInput" accept="image/*" class="hidden">
+        </div>
+
+        <div class="settings-pane" id="pane-privacy">
+          <h3>متصل الآن وآخر ظهور</h3>
+          <p class="hint-text">مين يقدر يشوف إنك متصل دلوقتي أو آخر مرة فتحت فيها التطبيق</p>
+          <div class="privacy-opt-group" id="lastSeenPrivacyGroup">
+            <button type="button" class="privacy-opt" data-privacy="everyone">للجميع</button>
+            <button type="button" class="privacy-opt" data-privacy="contacts">الأصدقاء بس</button>
+            <button type="button" class="privacy-opt" data-privacy="nobody">محدش</button>
+          </div>
+
+          <div class="settings-toggle-row">
+            <div class="settings-toggle-text">
+              <h3>الرسائل المقروءة والكتابة</h3>
+              <p class="hint-text">لو قفلتها، مش هتبعت ولا تستقبل علامة "تمت القراءة"، وكمان الشخص التاني مش هيشوف إنك بتكتب له. علامة القراءة بتتبعت دايمًا في الجروبات.</p>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="readReceiptsToggle" checked>
+              <span class="toggle-slider">
+                <span class="toggle-knob">
+                  <svg class="toggle-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg>
+                  <svg class="toggle-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <h3>حظر مستخدم</h3>
+          <div class="search-box inline">
+            <input type="text" id="blockIdInput" placeholder="رقم التعريف (11 رقم)" maxlength="11" inputmode="numeric">
+            <button id="blockIdBtn">حظر</button>
+          </div>
+          <p class="hint-text" id="blockMsg"></p>
+          <h3>المستخدمين المحظورين</h3>
+          <div class="blocked-list" id="blockedList">
+            <p class="hint-text">مفيش حد محظور حاليًا</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ---- Peer profile modal (opened by tapping the person in chat header) ---- -->
+<div class="profile-overlay hidden" id="peerProfileOverlay">
+  <div class="profile-panel">
+    <button type="button" class="icon-btn" id="closePeerProfile">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+    <button type="button" class="profile-avatar-big" id="peerProfileAvatarBig">
+      <span id="peerProfileAvatarInitial">؟</span>
+      <img id="peerProfileAvatarImg" alt="" class="hidden">
+    </button>
+    <div class="profile-title-block">
+      <h2 id="peerProfileName">—</h2>
+      <div class="profile-id-line" id="peerProfileIdLine">
+        <span class="profile-id" id="peerProfileId">—</span>
+        <button type="button" class="copy-id-btn" id="copyPeerIdBtn" title="نسخ الأيدي" aria-label="نسخ الأيدي">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+    <button type="button" class="save-contact-btn" id="saveContactBtn">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      <span id="saveContactBtnLabel">حفظ</span>
+    </button>
+    <div class="profile-bio-box">
+      <h3>نبذة</h3>
+      <p id="peerProfileBio">مفيش نبذة</p>
+    </div>
+  </div>
+</div>
+
+<!-- ---- Friends page: everyone I've saved from their profile ---- -->
+<div class="friends-overlay hidden" id="friendsOverlay">
+  <div class="friends-panel">
+    <div class="friends-top">
+      <h2>الأصدقاء</h2>
+      <button class="icon-btn" id="closeFriendsBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="friends-body">
+      <div class="friends-list" id="friendsList">
+        <p class="hint-text" id="friendsEmpty">لسه معندكش أي أصدقاء محفوظين. افتح شات أي حد واحفظه من صفحة ملفه.</p>
+      </div>
+    </div>
+    <button type="button" class="ai-friend-btn" id="openAiChatBtn">
+      <span class="logo-dot"></span>
+      <span>Wasla AI</span>
+    </button>
+  </div>
+</div>
+
+<!-- ---- Save-friend modal: lets you set a display name + family name before saving ---- -->
+<div class="save-friend-overlay hidden" id="saveFriendOverlay">
+  <div class="save-friend-panel">
+    <h3>حفظ في الأصدقاء</h3>
+    <div class="field">
+      <label>الاسم</label>
+      <input type="text" id="saveFriendNameInput" maxlength="30">
+    </div>
+    <div class="field">
+      <label>اسم العيلة (اختياري)</label>
+      <input type="text" id="saveFriendFamilyInput" maxlength="30" placeholder="اسم العيلة">
+    </div>
+    <button type="button" class="primary-btn" id="confirmSaveFriendBtn">حفظ</button>
+    <button type="button" class="secondary-btn" id="cancelSaveFriendBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- Fullscreen image lightbox (opened by tapping the profile photo) ---- -->
+<div class="lightbox hidden" id="imageLightbox">
+  <button type="button" class="lightbox-close" id="closeLightbox">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <img id="lightboxImg" src="" alt="">
+</div>
+
+<!-- ---- Right-click / long-press context menu for a message ---- -->
+<div class="msg-menu hidden" id="msgMenu">
+  <button type="button" data-action="reply" id="msgMenuReply">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17 4 12l5-5"/><path d="M4 12h10a6 6 0 0 1 6 6v1"/></svg>
+    رد
+  </button>
+  <button type="button" data-action="copy" id="msgMenuCopy">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    نسخ
+  </button>
+  <button type="button" data-action="pin" id="msgMenuPin">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1z"/></svg>
+    <span class="lbl">تثبيت</span>
+  </button>
+  <button type="button" data-action="select" id="msgMenuSelect">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    تحديد
+  </button>
+  <button type="button" data-action="delete" class="danger">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+    حذف
+  </button>
+</div>
+
+<!-- ---- Right-click menu on a chat-list item (split/desktop view) ---- -->
+<div class="msg-menu hidden" id="chatListMenu">
+  <button type="button" data-action="delete">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+    <span>حذف الشات</span>
+  </button>
+  <button type="button" data-action="block" class="danger" id="chatListMenuBlock">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+    <span>حظر الشخص</span>
+  </button>
+</div>
+
+<!-- ---- selection-mode "more" dropdown: pin (with duration) + copy, only when exactly one message is selected ---- -->
+<div class="msg-menu hidden" id="selectionMoreMenu">
+  <button type="button" data-action="pin" id="selectionMorePin">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1z"/></svg>
+    <span class="lbl">تثبيت</span>
+  </button>
+  <button type="button" data-action="copy">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    نسخ
+  </button>
+</div>
+
+<!-- ---- Pin duration modal — like WhatsApp, a pin expires after a chosen period ---- -->
+<div class="delete-overlay hidden" id="pinDurationOverlay">
+  <div class="delete-panel">
+    <h3>تثبيت الرسالة</h3>
+    <p>هتفضل الرسالة مثبتة لحد إمتى؟</p>
+    <button type="button" class="secondary-btn" data-duration="86400000">24 ساعة</button>
+    <button type="button" class="secondary-btn" data-duration="604800000">أسبوع</button>
+    <button type="button" class="secondary-btn" data-duration="2592000000">شهر</button>
+    <button type="button" class="secondary-btn" id="cancelPinDurationBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- Wasla AI opinion modal — shown once, the very first time someone
+     reacts (like or dislike) to an AI reply. Their answers get saved to
+     Firestore and read back on the /#ai-feedback-table admin page. ---- -->
+<div class="delete-overlay hidden" id="aiOpinionOverlay">
+  <div class="delete-panel ai-opinion-panel" id="aiOpinionPanel">
+    <div id="aiOpinionForm">
+      <h3>رأيك في Wasla AI</h3>
+      <p>عايزين نعرف رأيك عشان نطوّر المساعد الذكي.</p>
+      <div class="field" style="text-align:right;">
+        <label for="aiOpinionInput">رأيك في الذكاء الاصطناعي</label>
+        <textarea id="aiOpinionInput" maxlength="300" placeholder="اكتب رأيك هنا..."></textarea>
+      </div>
+      <div class="field" style="text-align:right;">
+        <label for="aiOpinionTipsInput">نصايح عشان يبقى أفضل (اختياري)</label>
+        <textarea id="aiOpinionTipsInput" maxlength="300" placeholder="اكتب اقتراحاتك هنا..."></textarea>
+      </div>
+      <button type="button" class="primary-btn" id="submitAiOpinionBtn">إرسال</button>
+      <button type="button" class="secondary-btn" id="skipAiOpinionBtn">مش دلوقتي</button>
+    </div>
+    <div class="ai-opinion-success hidden" id="aiOpinionSuccess">
+      <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+      <p>شكرًا لرأيك!</p>
+    </div>
+  </div>
+</div>
+
+<!-- ---- Right-click / long-press menu for the pinned banner (unpin only) ---- -->
+<div class="msg-menu hidden" id="pinnedMenu">
+  <button type="button" data-action="unpin" class="danger">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    إلغاء التثبيت
+  </button>
+</div>
+
+<!-- ---- Generic yes/no confirm modal, used instead of the browser's
+     native confirm() popup for chat-level delete actions ---- -->
+<div class="delete-overlay hidden" id="simpleConfirmOverlay">
+  <div class="delete-panel">
+    <h3 id="simpleConfirmTitle">تأكيد</h3>
+    <p id="simpleConfirmText">متأكد؟</p>
+    <button type="button" class="secondary-btn danger-btn" id="simpleConfirmYesBtn">تأكيد</button>
+    <button type="button" class="secondary-btn" id="simpleConfirmNoBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- Delete choice modal (delete for me / delete for everyone) ---- -->
+<div class="delete-overlay hidden" id="deleteOverlay">
+  <div class="delete-panel">
+    <h3 id="deleteModalTitle">حذف الرسالة</h3>
+    <p id="deleteModalText">عايز تحذفها منين؟</p>
+    <button type="button" class="secondary-btn" id="deleteForMeBtn">حذف من عندي بس</button>
+    <button type="button" class="secondary-btn danger-btn hidden" id="deleteForEveryoneBtn">حذف من عندنا الاتنين</button>
+    <button type="button" class="secondary-btn" id="cancelDeleteBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- Permanent account deletion: asks for the password before doing anything ---- -->
+<div class="delete-overlay hidden" id="deleteAccountOverlay">
+  <div class="delete-panel">
+    <h3>حذف الحساب نهائيًا</h3>
+    <p>ده هيمسح حسابك وكل بياناتك ومحادثاتك خالص ومش هينفع ترجعه تاني. اكتب كلمة السر عشان تأكد.</p>
+    <input type="password" id="deleteAccountPasswordInput" placeholder="كلمة السر" autocomplete="current-password">
+    <p class="auth-error" id="deleteAccountMsg"></p>
+    <button type="button" class="secondary-btn danger-btn" id="confirmDeleteAccountBtn">حذف الحساب نهائيًا</button>
+    <button type="button" class="secondary-btn" id="cancelDeleteAccountBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast"></div>
+
+<!-- ---- Blank admin page: table of everyone who reacted to a Wasla AI
+     reply, with their ID, which reaction they gave, their opinion, and
+     their suggestions. Not linked from anywhere in the normal UI — open
+     it by going to the site URL with #ai-feedback-table at the end. ---- -->
+<section id="aiFeedbackPage" class="admin-page hidden">
+  <div class="admin-page-inner">
+    <h2>آراء المستخدمين في Wasla AI</h2>
+    <table class="admin-table">
+      <thead>
+        <tr><th>الأيدي</th><th>التقييم</th><th>الرأي</th><th>نصايح</th></tr>
+      </thead>
+      <tbody id="aiFeedbackTableBody"></tbody>
+    </table>
+    <p class="hint-text hidden" id="aiFeedbackEmpty">لسه معدش حد بعت رأيه.</p>
+  </div>
+</section>
+
+<script>
+// السكرول بار بتاع settings-tabs مخفي، فده بيخلي المستخدم يقدر يسحبها
+// بالماوس (زي drag) أو يستخدم عجلة الماوس العادية (rotate) عشان تتحرك يمين/شمال
+// بدل ما يحتاج shift أو تراك باد.
+(function(){
+  var el = document.getElementById('settingsTabs');
+  if(!el) return;
+
+  // عجلة الماوس العادية (vertical) تتحول لسكرول أفقي
+  el.addEventListener('wheel', function(e){
+    if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive:false });
+
+  // سحب بالماوس (click & drag) للسكرول الأفقي
+  var isDown = false, startX, startScroll;
+  el.addEventListener('mousedown', function(e){
+    isDown = true;
+    el.classList.add('dragging');
+    startX = e.pageX;
+    startScroll = el.scrollLeft;
+  });
+  window.addEventListener('mouseup', function(){
+    isDown = false;
+    el.classList.remove('dragging');
+  });
+  window.addEventListener('mousemove', function(e){
+    if(!isDown) return;
+    e.preventDefault();
+    el.scrollLeft = startScroll - (e.pageX - startX);
+  });
+})();
+</script>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js" defer></script>
+
+<script src="script.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1300 @@
+/* =====================================================================
+   وصلة — Chat App Styles
+   Themeable via [data-theme="dark"|"light"] on <html>, plus a per-user
+   --chat-accent variable set from JS (Settings → chat colors).
+   ===================================================================== */
+
+:root{
+  --font-display:'Space Grotesk',sans-serif;
+  --font-body:'Cairo',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+
+  --chat-accent:#f2b134;      /* overridable per-user */
+  --chat-accent-ink:#1a1305;
+  --success:#4ade80;
+  --error:#f1594b;
+  --error-soft: rgba(241,89,75,.14);
+  /* tinted, transparent version of whatever --chat-accent currently is —
+     used for the WhatsApp-style "selected message" highlight, so the
+     highlight always matches the user's own chosen chat color instead
+     of being a fixed color */
+  --chat-accent-selected: color-mix(in srgb, var(--chat-accent) 28%, transparent);
+}
+
+html[data-theme="dark"]{
+  --bg:#0a0f1c;
+  --bg-2:#0d1424;
+  --grid-line: rgba(255,255,255,.035);
+  --sidebar-bg: linear-gradient(180deg,#101828,#0c1220);
+  --card-bg: linear-gradient(180deg,#141c30,#101728);
+  --card-border: rgba(255,255,255,.09);
+  --ink:#eceff6;
+  --ink-muted:#8b93a8;
+  --ink-dim:#5b6479;
+  --accent-soft: rgba(242,177,52,.14);
+  --input-bg: rgba(255,255,255,.04);
+  --composer-pill-bg: rgba(255,255,255,.07);
+  --bubble-in: #182238;
+  --bubble-out: color-mix(in srgb, var(--chat-accent) 22%, #182238);
+  --chat-bg: radial-gradient(1200px 700px at 50% -10%, #131c30 0%, #0a0f1c 55%);
+  --shadow: 0 30px 80px -20px rgba(0,0,0,.7);
+  --scrollbar: rgba(255,255,255,.12);
+}
+
+html[data-theme="light"]{
+  --bg:#f4f6fb;
+  --bg-2:#eef1f8;
+  --grid-line: rgba(20,30,50,.04);
+  --sidebar-bg: linear-gradient(180deg,#ffffff,#f7f9fd);
+  --card-bg: linear-gradient(180deg,#ffffff,#f7f9fd);
+  --card-border: rgba(20,30,50,.09);
+  --ink:#1b2333;
+  --ink-muted:#5c6579;
+  --ink-dim:#8992a6;
+  --accent-soft: rgba(242,177,52,.18);
+  --input-bg: rgba(20,30,50,.04);
+  --composer-pill-bg: rgba(255,255,255,.55);
+  --bubble-in: #ffffff;
+  --bubble-out: color-mix(in srgb, var(--chat-accent) 20%, #ffffff);
+  --chat-bg: radial-gradient(1200px 700px at 50% -10%, #e9edf6 0%, #f4f6fb 55%);
+  --shadow: 0 20px 60px -25px rgba(20,30,50,.25);
+  --scrollbar: rgba(20,30,50,.15);
+}
+
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background: var(--chat-bg), var(--bg);
+  color:var(--ink);
+  font-family:var(--font-body);
+  min-height:100vh;
+  position:relative;
+  overflow-x:hidden;
+  transition: background .3s ease, color .3s ease;
+}
+h1,h2,h3{font-family:var(--font-display);}
+button{font-family:inherit; cursor:pointer;}
+input,textarea{font-family:inherit;}
+.hidden{display:none !important;}
+
+.bg-grid{
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(900px 700px at 50% 20%, #000 10%, transparent 75%);
+}
+
+.logo-dot{
+  display:inline-block; width:10px; height:10px; border-radius:50%;
+  background:var(--chat-accent); box-shadow:0 0 0 4px var(--accent-soft);
+}
+.logo-dot.big{width:20px; height:20px; box-shadow:0 0 0 8px var(--accent-soft); margin-bottom:14px;}
+
+/* =====================================================================
+   1) GATE — puzzle verification
+   ===================================================================== */
+.gate{
+  position:fixed; inset:0; z-index:100;
+  display:flex; align-items:center; justify-content:center;
+  padding:20px;
+  background: radial-gradient(1000px 600px at 50% 10%, rgba(20,28,48,.4), transparent), rgba(6,9,16,.55);
+  backdrop-filter: blur(6px);
+  transition: opacity .45s ease, visibility .45s;
+}
+.gate.hidden{opacity:0; visibility:hidden; pointer-events:none;}
+.gate-inner{width:100%; display:flex; justify-content:center; animation: modalIn .32s cubic-bezier(.2,.8,.2,1);}
+@keyframes modalIn{ from{ transform:scale(.96); opacity:0; } to{ transform:scale(1); opacity:1; } }
+
+.gate-card{
+  position:relative; width:100%; max-width:440px;
+  background:var(--card-bg); border:1px solid var(--card-border); border-radius:20px;
+  padding:28px 22px 24px; box-shadow: var(--shadow);
+  overflow:hidden;
+}
+.corner{display:block; position:absolute; width:16px; height:16px; border:2px solid var(--chat-accent); opacity:.7;}
+.corner.tl{top:10px; left:10px; border-right:none; border-bottom:none; border-radius:4px 0 0 0;}
+.corner.tr{top:10px; right:10px; border-left:none; border-bottom:none; border-radius:0 4px 0 0;}
+.corner.bl{bottom:10px; left:10px; border-right:none; border-top:none; border-radius:0 0 0 4px;}
+.corner.br{bottom:10px; right:10px; border-left:none; border-top:none; border-radius:0 0 4px 0;}
+
+.gate-header{position:relative; z-index:1; margin-bottom:18px; text-align:center;}
+.eyebrow-tag{
+  display:inline-flex; align-items:center; gap:7px;
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--chat-accent); background:var(--accent-soft); border:1px solid var(--accent-soft);
+  padding:5px 10px; border-radius:999px; margin-bottom:14px;
+}
+.gate-header h1{font-size:19px; margin:0 0 8px; line-height:1.4;}
+.gate-header p{color:var(--ink-muted); font-size:13.5px; line-height:1.7; margin:0;}
+
+.puzzle-frame{
+  position:relative; width:100%; aspect-ratio: 380/200; border-radius:12px; overflow:hidden;
+  margin-bottom:16px; border:1px solid var(--card-border); background:#0a0f1c;
+}
+.puzzle-frame canvas{display:block; width:100%; height:100%;}
+.puzzle-piece{
+  position:absolute; top:0; left:0; width:50px; height:200px;
+  background:#0a0f1c; border-right:2px solid var(--chat-accent); border-left:2px solid var(--chat-accent);
+  clip-path: polygon(0 0,100% 0,100% 40%,85% 40%,85% 55%,100% 55%,100% 100%,0 100%);
+  cursor:grab; transition: box-shadow .15s;
+}
+.puzzle-piece.wrong{animation: shake .4s;}
+@keyframes shake{
+  0%,100%{transform:translateX(0);} 20%{transform:translateX(-6px);} 40%{transform:translateX(6px);}
+  60%{transform:translateX(-4px);} 80%{transform:translateX(4px);}
+}
+
+.slider-track{
+  position:relative; height:46px; border-radius:12px; background:var(--input-bg);
+  border:1px solid var(--card-border); overflow:hidden; user-select:none;
+}
+.slider-fill{position:absolute; inset:0; width:0; background:var(--accent-soft); transition:none;}
+.slider-handle{
+  position:absolute; top:3px; right:3px; width:40px; height:40px; border-radius:9px;
+  background:var(--chat-accent); color:var(--chat-accent-ink);
+  display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none;
+  box-shadow:0 6px 16px -4px rgba(0,0,0,.5);
+}
+.slider-handle svg{transform:scaleX(-1);}
+.slider-label{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:13px; color:var(--ink-muted); pointer-events:none;
+}
+
+.status-row{min-height:20px; text-align:center; font-size:13px; margin-top:12px;}
+.status-row.error{color:var(--error);}
+.status-row.success{color:var(--success);}
+
+.success-view{display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:30px 10px 14px;}
+.success-check{width:80px; height:80px;}
+.success-check-circle{fill:none; stroke:var(--success); stroke-width:4; stroke-dasharray:227; stroke-dashoffset:227; animation:circleDraw .5s ease forwards;}
+.success-check-mark{fill:none; stroke:var(--success); stroke-width:5.5; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:53; stroke-dashoffset:53; animation:checkDraw .35s ease forwards .45s;}
+.success-text{font-family:var(--font-display); font-weight:700; font-size:18px; color:var(--success); opacity:0; animation:textIn .4s ease forwards .78s;}
+@keyframes circleDraw{ to{ stroke-dashoffset:0; } }
+@keyframes checkDraw{ to{ stroke-dashoffset:0; } }
+@keyframes textIn{ to{ opacity:1; transform:translateY(0); } }
+
+/* =====================================================================
+   1b) GATE — multi-challenge verification (text / shapes / piece)
+   ===================================================================== */
+.gate-shell{
+  width:100%; max-width:900px; display:flex; align-items:stretch; gap:22px; justify-content:center;
+}
+
+/* ---- desktop-only descriptive side panel ---- */
+.gate-side{
+  display:none;
+  position:relative; flex:0 0 300px; border-radius:20px; padding:30px 26px;
+  background:var(--card-bg); border:1px solid var(--card-border); box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.gate-side-glow{
+  position:absolute; top:-70px; left:-70px; width:220px; height:220px; border-radius:50%;
+  background:radial-gradient(circle, var(--accent-soft), transparent 70%); pointer-events:none;
+}
+.gate-side h2{position:relative; font-size:18px; margin:4px 0 10px; line-height:1.4;}
+.gate-side > p{position:relative; color:var(--ink-muted); font-size:13px; line-height:1.8; margin:0 0 20px;}
+.gate-feature-list{position:relative; list-style:none; margin:0 0 18px; padding:0; display:flex; flex-direction:column; gap:14px;}
+.gate-feature-list li{display:flex; align-items:flex-start; gap:10px;}
+.gate-feature-icon{
+  width:32px; height:32px; border-radius:9px; background:var(--accent-soft); color:var(--chat-accent);
+  display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0;
+}
+.gate-feature-list strong{display:block; font-size:12.5px; margin-bottom:2px;}
+.gate-feature-list span{display:block; font-size:11.5px; color:var(--ink-dim); line-height:1.6;}
+.gate-side-note{position:relative; font-size:11.5px; color:var(--ink-dim); line-height:1.8; padding-top:14px; border-top:1px dashed var(--card-border);}
+
+.gate-card{flex:1 1 440px; max-width:460px;}
+
+/* ---- generic challenge shell ---- */
+.challenge{display:flex; flex-direction:column; gap:12px;}
+.challenge-hint{font-size:12.5px; color:var(--ink-muted); text-align:center; line-height:1.7; margin:0;}
+.challenge-submit{margin-top:2px;}
+.challenge-reset{font-size:12px; padding:9px;}
+.challenge-input{
+  width:100%; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:10px;
+  color:var(--ink); font-size:18px; letter-spacing:.14em; text-align:center; padding:12px; outline:none;
+  font-family:var(--font-mono); direction:ltr; transition:.2s;
+}
+.challenge-input:focus{border-color:var(--chat-accent); background:var(--accent-soft);}
+
+/* ---- text captcha ---- */
+.captcha-frame{
+  width:100%; border-radius:12px; overflow:hidden; border:1px solid var(--card-border); background:#0a0f1c;
+  display:flex; justify-content:center;
+}
+.captcha-frame canvas{display:block; width:100%; height:auto;}
+
+/* ---- shape-order challenge ---- */
+.shape-reference{
+  display:flex; justify-content:center; gap:10px; padding:10px; border-radius:12px;
+  background:var(--input-bg); border:1px solid var(--card-border); flex-wrap:wrap;
+}
+.shape-chip{width:44px; height:44px; display:flex; align-items:center; justify-content:center;}
+.shape-answer-slots{display:flex; justify-content:center; gap:8px;}
+.shape-slot{
+  width:40px; height:40px; border-radius:10px; border:1.5px dashed var(--card-border);
+  display:flex; align-items:center; justify-content:center; background:var(--input-bg);
+}
+.shape-pool{display:flex; flex-wrap:wrap; justify-content:center; gap:10px; padding:6px 0;}
+.shape-pool-btn{
+  width:56px; height:56px; border-radius:12px; background:var(--input-bg); border:1.5px solid var(--card-border);
+  display:flex; align-items:center; justify-content:center; transition:.15s;
+}
+.shape-pool-btn:hover{border-color:var(--accent-soft); background:var(--accent-soft);}
+.shape-pool-btn.used{opacity:.3; pointer-events:none; transform:scale(.9);}
+
+/* ---- drag-piece challenge ---- */
+.piece-board{
+  position:relative; margin:0 auto; border-radius:12px; overflow:hidden; border:1px solid var(--card-border);
+}
+.piece-board-bg{position:absolute; inset:0; width:100%; height:100%; display:block;}
+.piece-drag{
+  position:absolute; cursor:grab; touch-action:none; filter:drop-shadow(0 6px 14px rgba(0,0,0,.5));
+}
+.piece-drag:active{cursor:grabbing;}
+
+/* ---- progress bar ---- */
+.gate-progress{display:flex; align-items:center; gap:10px; margin-top:16px;}
+.gate-progress-track{flex:1; height:6px; border-radius:999px; background:var(--input-bg); border:1px solid var(--card-border); overflow:hidden;}
+.gate-progress-fill{height:100%; width:0; background:var(--chat-accent); transition: width .35s ease;}
+.gate-progress-label{font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); direction:ltr; flex-shrink:0;}
+
+/* =====================================================================
+   2) AUTH / REGISTRATION SCREEN
+   ===================================================================== */
+.auth-screen{
+  position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+  height:100vh; height:100dvh; padding:24px; overflow:hidden; transition: opacity .3s;
+  scrollbar-width:none; -ms-overflow-style:none;
+}
+.auth-screen::-webkit-scrollbar{display:none; width:0; height:0;}
+.auth-card{
+  width:100%; max-width:420px; max-height:100%; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:22px; padding:30px 26px; box-shadow:var(--shadow); text-align:center; overflow:hidden;
+  scrollbar-width:none; -ms-overflow-style:none;
+}
+.auth-card::-webkit-scrollbar{display:none; width:0; height:0;}
+.auth-logo{font-family:var(--font-display); font-weight:700; font-size:22px; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:18px;}
+.auth-card h1{font-size:21px; margin:0 0 8px;}
+.auth-sub{color:var(--ink-muted); font-size:13.5px; line-height:1.7; margin:0 0 22px;}
+
+.avatar-picker{display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:18px;}
+.avatar-preview{
+  width:84px; height:84px; border-radius:50%; background:var(--input-bg); border:2px dashed var(--card-border);
+  display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--ink-dim); overflow:hidden;
+}
+.avatar-preview img{width:100%; height:100%; object-fit:cover;}
+.avatar-upload-btn{
+  font-size:12.5px; color:var(--chat-accent); background:var(--accent-soft); padding:6px 14px;
+  border-radius:999px; cursor:pointer; border:1px solid var(--accent-soft);
+}
+
+.field{text-align:right; margin-bottom:14px;}
+.field label{display:block; font-size:12.5px; color:var(--ink-muted); margin-bottom:6px;}
+.field .req{color:var(--error);}
+.field input, .field textarea{
+  width:100%; min-width:0; max-width:100%; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:10px;
+  color:var(--ink); font-size:14.5px; padding:11px 12px; outline:none; transition:.2s; resize:none;
+}
+.field input:focus, .field textarea:focus{border-color:var(--chat-accent); background:var(--accent-soft);}
+.field textarea{min-height:64px;}
+
+.password-input-wrap{position:relative;}
+.password-input-wrap input{padding-right:42px;}
+.password-toggle{
+  position:absolute; top:50%; right:6px; transform:translateY(-50%);
+  background:none; border:none; padding:7px; color:var(--ink-dim); cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:.15s; border-radius:8px;
+}
+.password-toggle:hover{color:var(--chat-accent); background:var(--accent-soft);}
+.password-toggle svg{display:block;}
+.password-toggle .eye-closed{display:none;}
+.password-toggle.showing .eye-open{display:none;}
+.password-toggle.showing .eye-closed{display:block;}
+
+.primary-btn{
+  width:100%; background:var(--chat-accent); color:var(--chat-accent-ink); border:none; border-radius:12px;
+  font-weight:700; font-size:14.5px; padding:13px; transition:.15s; margin-top:6px;
+}
+.primary-btn:hover{filter:brightness(1.08); transform:translateY(-1px);}
+.primary-btn:disabled{opacity:.5; cursor:not-allowed; transform:none;}
+.secondary-btn{
+  background:var(--input-bg); color:var(--ink); border:1.5px solid var(--card-border); border-radius:12px;
+  font-weight:600; font-size:13.5px; padding:11px; display:block; text-align:center;
+}
+.auth-error{color:var(--error); font-size:12.5px; min-height:16px; margin-top:10px;}
+
+.auth-tabs{display:flex; gap:6px; margin-bottom:20px; background:var(--input-bg); border-radius:12px; padding:4px;}
+.auth-tab-btn{flex:1; background:none; border:none; color:var(--ink-muted); font-size:13px; font-weight:700; padding:9px; border-radius:9px; transition:.2s; cursor:pointer;}
+.auth-tab-btn.active{background:var(--chat-accent); color:var(--chat-accent-ink);}
+.auth-pane{display:none;}
+.auth-pane.active{display:block;}
+.logout-btn{width:100%; margin-top:10px; color:var(--error); border-color:var(--error-soft);}
+.logout-btn:hover{background:var(--error-soft); border-color:var(--error);}
+.delete-account-btn{width:100%; margin-top:8px; background:var(--error-soft); color:var(--error); border-color:var(--error);}
+.delete-account-btn:hover{background:var(--error); color:#fff;}
+
+/* =====================================================================
+   3) APP SHELL
+   ===================================================================== */
+.app{position:fixed; inset:0; z-index:10; display:flex;}
+
+/* ---- sidebar ---- */
+.sidebar{
+  width:380px; flex-shrink:0; background:var(--sidebar-bg); border-left:1px solid var(--card-border);
+  display:flex; flex-direction:column; z-index:2; position:relative;
+}
+/* ---- Floating circular Wasla AI shortcut, bottom-right of the chat list ---- */
+.ai-float-btn{
+  position:absolute; bottom:18px; right:18px; z-index:5;
+  width:52px; height:52px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,.08); backdrop-filter:blur(6px);
+  border:1px solid var(--card-border); cursor:pointer;
+  box-shadow:0 6px 18px rgba(0,0,0,.22);
+  transition:transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.ai-float-btn:hover{background:var(--accent-soft); border-color:rgba(242,177,52,.4); transform:translateY(-2px);}
+.ai-float-btn:active{transform:translateY(0);}
+.ai-float-btn .logo-dot{flex-shrink:0;}
+.ai-float-badge{
+  position:absolute; top:-2px; left:-2px; width:12px; height:12px; border-radius:50%;
+  background:var(--accent); border:2px solid var(--sidebar-bg);
+}
+.ai-float-badge.hidden{display:none;}
+.sidebar-header{display:flex; align-items:center; justify-content:space-between; padding:16px; border-bottom:1px solid var(--card-border); gap:10px;}
+.me{display:flex; align-items:center; gap:10px; cursor:pointer; min-width:0;}
+.me-info{display:flex; flex-direction:column; min-width:0;}
+.me-info strong{font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px;}
+.my-id{display:block; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); direction:ltr; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px;}
+.sidebar-actions{display:flex; align-items:center; gap:8px;}
+
+.avatar{
+  width:44px; height:44px; border-radius:50%; background:var(--input-bg); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--ink-muted); overflow:hidden; position:relative;
+}
+.avatar img{width:100%; height:100%; object-fit:cover;}
+.avatar.sm{width:40px; height:40px; font-size:14px;}
+
+.icon-btn{
+  width:36px; height:36px; border-radius:10px; background:var(--input-bg); border:1px solid var(--card-border);
+  color:var(--ink-muted); display:flex; align-items:center; justify-content:center; transition:.2s; flex-shrink:0;
+}
+.icon-btn:hover{color:var(--chat-accent); border-color:var(--accent-soft); background:var(--accent-soft);}
+.icon-btn.danger:hover{color:var(--error); border-color:var(--error-soft); background:var(--error-soft);}
+
+.settings-launcher{
+  display:flex; align-items:center; gap:8px; background:var(--input-bg); border:1px solid var(--card-border);
+  border-radius:999px; padding:7px 14px 7px 8px; color:var(--ink); font-size:12.5px; font-weight:600; transition:.2s;
+}
+.settings-launcher:hover{border-color:var(--accent-soft); background:var(--accent-soft); color:var(--chat-accent);}
+.settings-launcher-ring{
+  width:20px; height:20px; border-radius:50%; flex-shrink:0;
+  background: conic-gradient(var(--chat-accent) 0deg 270deg, var(--card-border) 270deg 360deg);
+  position:relative;
+}
+.settings-launcher-ring::after{content:""; position:absolute; inset:4px; border-radius:50%; background:var(--sidebar-bg);}
+
+.search-box{display:flex; align-items:center; gap:8px; margin:14px 16px; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:12px; padding:8px 12px;}
+.search-box svg{color:var(--ink-dim); flex-shrink:0;}
+.search-box input{flex:1; min-width:0; background:none; border:none; outline:none; color:var(--ink); font-size:13.5px; direction:ltr; text-align:right;}
+.search-box button{background:var(--chat-accent); color:var(--chat-accent-ink); border:none; border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:700; flex-shrink:0;}
+.search-box.inline{margin:10px 0;}
+
+.search-result{margin:0 16px 14px; padding:12px; border-radius:12px; background:var(--input-bg); border:1px solid var(--card-border); display:flex; align-items:center; gap:10px;}
+.search-result .sr-info{flex:1; min-width:0;}
+.search-result .sr-info strong{display:block; font-size:13.5px;}
+.search-result .sr-info span{font-size:11px; color:var(--ink-dim); font-family:var(--font-mono); direction:ltr;}
+.search-result button{background:var(--chat-accent); color:var(--chat-accent-ink); border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:700;}
+.search-result.empty, .search-result.blocked{color:var(--ink-muted); font-size:13px; justify-content:center;}
+
+.chat-list{flex:1; overflow-y:auto; padding:4px 8px 12px;}
+.chat-item{display:flex; align-items:center; gap:10px; padding:10px; border-radius:14px; cursor:pointer; transition:.15s; margin-bottom:2px;}
+.chat-item:hover{background:var(--input-bg);}
+.chat-item.active{background:var(--accent-soft);}
+.chat-item .ci-info{flex:1; min-width:0;}
+.chat-item .ci-top{display:flex; justify-content:space-between; align-items:center; gap:6px;}
+.chat-item .ci-top strong{font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.chat-item .ci-top-right{display:flex; align-items:center; gap:5px; flex-shrink:0;}
+.chat-item .ci-time{font-size:10.5px; color:var(--ink-dim); flex-shrink:0;}
+.chat-item .ci-bottom{display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:2px;}
+.chat-item .ci-last-wrap{display:flex; align-items:center; gap:4px; flex:1; min-width:0;}
+.chat-item .ci-last{font-size:12.5px; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; flex:1; min-width:0;}
+.chat-item .ci-draft-label{font-size:12.5px; color:var(--success); font-weight:600; flex-shrink:0;}
+.chat-item .ci-last.draft{color:var(--ink-muted);}
+/* status tick: a standalone badge at the very start of the row, right
+   next to the avatar, vertically centered against the whole item
+   height — not squeezed inline with the message preview text */
+.ci-tick-standalone{display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.ci-tick-standalone .msg-ticks.ci-tick{width:16px; height:12px; display:inline-flex; align-items:center;}
+
+/* pin-a-person button, top-right of each chat list row (next to the time) */
+.pin-toggle-btn{
+  display:flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:6px;
+  background:none; border:none; color:var(--ink-dim); opacity:0; transition:.15s; cursor:pointer; flex-shrink:0;
+}
+.chat-item:hover .pin-toggle-btn{opacity:.65;}
+.pin-toggle-btn:hover{opacity:1 !important; background:var(--input-bg); color:var(--chat-accent);}
+.pin-toggle-btn.active{opacity:1; color:var(--chat-accent);}
+.chat-item.pinned{background:var(--input-bg);}
+.chat-item.pinned.active{background:var(--accent-soft);}
+
+/* ---- chat-list selection (right-click on desktop / long-press on
+   phone) — same green tint + avatar checkmark WhatsApp uses when you
+   select conversations in the list ---- */
+.chat-item.selected{background:var(--chat-accent-selected);}
+.chat-item.selected:hover{background:var(--chat-accent-selected);}
+.ci-avatar-wrap{position:relative; flex-shrink:0;}
+.ci-select-check{
+  position:absolute; right:-2px; bottom:-2px; width:17px; height:17px; border-radius:50%;
+  background:var(--chat-accent); color:var(--chat-accent-ink); display:none; align-items:center; justify-content:center;
+  border:2px solid var(--sidebar-bg);
+}
+.chat-item.selected .ci-select-check{display:flex;}
+.chat-item.selected .avatar{opacity:.9;}
+
+/* ---- chat-list selection toolbar (mobile long-press) — same shell as
+   the message selection toolbar, just different ids for its buttons ---- */
+#chatListSelectionCancelBtn{display:flex; background:none; border:none; color:var(--ink); padding:4px; cursor:pointer;}
+.unread-badge{
+  background:var(--chat-accent); color:var(--chat-accent-ink); font-family:var(--font-mono);
+  font-size:11px; font-weight:700; min-width:19px; height:19px; border-radius:999px;
+  display:flex; align-items:center; justify-content:center; padding:0 5px; flex-shrink:0;
+}
+
+.empty-state{display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; padding:50px 24px; color:var(--ink-dim);}
+.empty-state p{font-size:13px; line-height:1.8; margin:0;}
+
+/* ---- chat window ---- */
+.chat-window{flex:1; display:flex; flex-direction:column; position:relative; min-width:0;}
+.chat-placeholder{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--ink-dim); text-align:center;}
+.chat-placeholder h2{margin:0 0 6px; color:var(--ink-muted);}
+.chat-placeholder p{font-size:13.5px; margin:0;}
+
+.chat-active{display:flex; flex-direction:column; height:100%; position:relative;}
+.chat-header{display:flex; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid var(--card-border); background:var(--sidebar-bg);}
+.back-btn{display:flex; background:none; border:none; color:var(--ink); padding:4px;}
+
+/* ---- selection-mode toolbar (replaces .chat-header while messages are
+   selected) — mirrors WhatsApp: cancel/back on one side, a live count,
+   then reply / delete / more actions on the other ---- */
+.selection-toolbar{display:flex; align-items:center; gap:6px; padding:12px 18px; border-bottom:1px solid var(--card-border); background:var(--sidebar-bg);}
+.selection-toolbar #selectionCancelBtn{display:flex; background:none; border:none; color:var(--ink); padding:4px; cursor:pointer;}
+.selection-count{font-family:var(--font-mono); font-weight:700; font-size:15px; color:var(--ink); min-width:14px; text-align:center;}
+.selection-actions{display:flex; align-items:center; gap:4px; margin-inline-start:auto;}
+.peer-info-trigger{
+  display:flex; align-items:center; gap:12px; flex:1; min-width:0;
+  background:none; border:none; padding:4px 6px; margin:-4px -6px; border-radius:10px;
+  cursor:pointer; text-align:right; transition:.15s; font:inherit; color:inherit;
+}
+.peer-info-trigger:hover{background:var(--input-bg);}
+.peer-info{flex:1; min-width:0; display:flex; flex-direction:column;}
+/* Stranger (not saved as a friend) -> ID is the big/primary line, name
+   small underneath. Saved (peer-info-trigger.peer-saved) -> my chosen
+   name flips up to be the big/primary line, ID shrinks underneath. */
+.peer-info strong{order:2; transition:font-size .15s, color .15s; font-size:11px; font-weight:600; color:var(--ink-dim); font-family:var(--font-body);}
+.peer-info span#peerId{order:1; transition:font-size .15s, color .15s; font-size:14.5px; font-weight:700; color:var(--ink); font-family:var(--font-mono); direction:ltr; text-align:right;}
+.peer-info .peer-status{order:3; font-size:11px; color:var(--ink-dim); font-family:var(--font-body); direction:rtl; text-align:right; margin-top:1px;}
+#peerProfileTrigger.peer-saved .peer-info strong{order:1; font-size:14.5px; font-weight:700; color:var(--ink); font-family:var(--font-body);}
+#peerProfileTrigger.peer-saved .peer-info span#peerId{order:2; font-size:11px; font-weight:600; color:var(--ink-dim); font-family:var(--font-mono);}
+
+.messages{flex:1; overflow-y:auto; padding:20px 26px; display:flex; flex-direction:column; gap:4px; background: var(--wallpaper, none);}
+.msg{
+  max-width:62%; padding:9px 13px; border-radius:16px; font-size:14px; line-height:1.55; position:relative; word-wrap:break-word; margin-bottom:4px; box-shadow:0 2px 6px rgba(0,0,0,.06);
+  /* text can only be copied through the selection-mode "copy" action —
+     never by dragging/tapping on it directly */
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+  /* let the browser handle vertical scrolling natively, but leave
+     horizontal movement to our own swipe-to-reply JS below — without
+     this, iOS/iPad Safari sometimes claims the gesture for its own
+     scroll/selection handling before our touchmove listener gets a
+     clean read on it, which is why the swipe felt unreliable on iPad
+     specifically even though the same code works fine on phone */
+  touch-action: pan-y;
+}
+.msg.out{align-self:flex-start; background:var(--bubble-out); border-bottom-left-radius:4px; color:var(--ink);}
+.msg.out.pending{opacity:.6;}
+.msg.in{align-self:flex-end; background:var(--bubble-in); border-bottom-right-radius:4px; color:var(--ink); border:1px solid var(--card-border);}
+.msg .msg-text{white-space:pre-wrap;}
+/* selection-mode highlight — a transparent tint of the user's own chat
+   color, laid on top of whatever the bubble's background already is,
+   plus a thin ring in the same color so it reads clearly on both light
+   and dark themes */
+.msg.selected{
+  background-image: linear-gradient(var(--chat-accent-selected), var(--chat-accent-selected));
+  box-shadow: 0 0 0 1.5px var(--chat-accent) inset, 0 2px 6px rgba(0,0,0,.06);
+}
+/* time+ticks sit on their own small line below the text, always. For
+   sent (out) messages the bubble is anchored on the right, so the
+   meta line stays pinned to that same right/start edge no matter how
+   wide the bubble grows. For received (in) messages the bubble is
+   anchored on the left, so the meta line stays pinned to that left/end
+   edge instead. */
+.msg .msg-meta{
+  display:flex; align-items:center; gap:3px; width:100%;
+  margin:4px 0 0; font-size:10.5px; color:var(--ink-dim); direction:ltr; user-select:none;
+}
+.msg.out .msg-meta{justify-content:flex-end;}
+.msg.in .msg-meta{justify-content:flex-end;}
+.msg time{font-size:10.5px; color:inherit; white-space:nowrap;}
+.msg-pin-badge{display:inline-flex; align-items:center; justify-content:center; width:11px; height:11px; flex-shrink:0; color:inherit;}
+.msg-pin-badge svg{width:100%; height:100%; display:block;}
+.msg-ticks{display:inline-flex; width:15px; height:11px; flex-shrink:0; color:var(--ink-dim);}
+.msg-ticks svg{width:100%; height:100%; display:block;}
+.msg-ticks.read{color:#53bdeb;}
+/* quick pulse-in when jumping to a pinned message, then holds at a
+   steady glow (via forwards) instead of fading straight back out —
+   JS keeps this class on until the person scrolls/taps away, so it
+   stays lit while they're still reading it */
+.msg{transition:transform .18s ease, box-shadow .4s ease;}
+.msg.pinned-flash{animation:pinnedFlashIn .35s ease forwards;}
+@keyframes pinnedFlashIn{ 0%{box-shadow:0 0 0 2px var(--chat-accent);} 100%{box-shadow:0 0 0 2px var(--chat-accent), 0 2px 10px rgba(0,0,0,.08);} }
+
+/* "you/they deleted this message" placeholder bubble — same look on
+   both sides of the chat, only the wording differs. Icon+text share
+   the first line, time/ticks drop to their own line below, same as a
+   normal bubble. */
+.msg.deleted{cursor:default;}
+.msg-deleted-icon{display:inline-flex; vertical-align:-2px; margin-left:6px; color:var(--ink-dim); opacity:.75;}
+.msg-deleted-icon svg{width:14px; height:14px; display:block;}
+.msg-deleted-text{font-style:italic; color:var(--ink-dim); font-size:13.5px;}
+
+/* quoted "replying to" block shown inside a bubble */
+.msg-reply-quote{
+  display:flex; flex-direction:column; gap:1px; background:rgba(0,0,0,.14); border-radius:8px;
+  padding:6px 9px; margin-bottom:5px; border-right:3px solid var(--chat-accent); cursor:pointer;
+}
+.msg-reply-quote strong{font-size:11.5px; color:var(--chat-accent); display:block; font-weight:700;}
+.msg-reply-quote span{font-size:12.5px; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block;}
+
+/* small floating icon shown while swiping a message on touch devices */
+.swipe-reply-icon{
+  position:fixed; z-index:60; width:30px; height:30px; border-radius:50%;
+  background:var(--card-bg); border:1px solid var(--card-border); color:var(--chat-accent);
+  display:flex; align-items:center; justify-content:center; pointer-events:none;
+  transition:opacity .1s; box-shadow:var(--shadow);
+}
+.swipe-reply-icon svg{width:16px; height:16px;}
+.day-sep{align-self:center; font-size:11px; color:var(--ink-dim); background:var(--input-bg); padding:4px 12px; border-radius:999px; margin:10px 0;}
+
+.block-banner{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; border-top:1px solid var(--card-border); background:var(--error-soft); color:var(--error); font-size:13px; line-height:1.6;}
+.block-banner.theirs{background:var(--input-bg); color:var(--ink-muted);}
+.block-banner button{background:var(--chat-accent); color:var(--chat-accent-ink); border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:700; flex-shrink:0; cursor:pointer;}
+
+/* ---- thin "message deleted for me" bar shown above the composer ---- */
+.deleted-for-me-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:7px 18px; background:var(--input-bg); border-top:1px solid var(--card-border);
+  font-size:12.5px; color:var(--ink-muted);
+}
+.deleted-for-me-bar.hidden{display:none;}
+.deleted-for-me-bar button{
+  background:none; border:none; color:var(--chat-accent); font-size:12.5px; font-weight:700;
+  cursor:pointer; padding:2px 4px; flex-shrink:0;
+}
+.deleted-for-me-bar button:hover{text-decoration:underline;}
+
+/* ---- peer "typing" bubble — NOT part of the composer at all. It lives
+   as the very last item inside #messages (right above the composer,
+   at the bottom/end of the chat like any new incoming message would),
+   styled exactly like a normal received bubble (.msg.in), just holding
+   3 bouncing dots instead of text. Shown on MY screen when the OTHER
+   person is actively typing, driven by Firestore (see script.js). */
+.msg.typing-indicator{
+  display:flex; align-items:center; gap:4px;
+  padding:8px 12px;
+  opacity:0; transform:translateY(16px) scale(.92);
+  transition:opacity .3s cubic-bezier(.34,1.56,.64,1), transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.msg.typing-indicator.ti-show{opacity:1; transform:translateY(0) scale(1);}
+.msg.typing-indicator .ti-dot{
+  width:5.5px; height:5.5px; border-radius:50%;
+  background:var(--ink-dim);
+  animation:tiBounce 1.1s ease-in-out infinite;
+}
+.msg.typing-indicator .ti-dot:nth-child(1){animation-delay:0s;}
+.msg.typing-indicator .ti-dot:nth-child(2){animation-delay:.15s;}
+.msg.typing-indicator .ti-dot:nth-child(3){animation-delay:.3s;}
+@keyframes tiBounce{
+  0%, 60%, 100%{transform:translateY(0); opacity:.45;}
+  30%{transform:translateY(-3px); opacity:1;}
+}
+
+.composer{position:relative; display:flex; align-items:flex-end; gap:10px; padding:12px 16px; background:transparent;}
+/* ---- floating jump-to-bottom button: pinned just above the composer's
+   own top edge (so it tracks correctly even while the textarea grows
+   taller), on the right — the mirror side from the typing-indicator
+   bubble, which sits on the left inside #messages. Toggled by a
+   dedicated "stbb-show" class rather than raw display, so opacity/
+   transform can actually transition instead of snapping. ---- */
+.scroll-to-bottom-btn{
+  position:absolute; top:-50px; right:16px; z-index:5;
+  width:38px; height:38px; border-radius:50%;
+  background:var(--card-bg); border:1px solid var(--card-border);
+  color:var(--ink);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.22);
+  cursor:pointer;
+  opacity:0; transform:translateY(10px) scale(.9);
+  pointer-events:none;
+  transition:opacity .2s ease, transform .2s ease;
+}
+.scroll-to-bottom-btn.hidden{display:none;}
+.scroll-to-bottom-btn.stbb-show{opacity:1; transform:translateY(0) scale(1); pointer-events:auto;}
+.scroll-to-bottom-btn:hover{filter:brightness(1.12);}
+.scroll-to-bottom-btn svg{display:block;}
+.composer-pill{
+  flex:1; display:flex; align-items:flex-end; gap:6px; min-width:0;
+  background:transparent;
+  border:1px solid var(--card-border); border-radius:26px; padding:6px 8px; transition:.15s;
+}
+.composer-pill:focus-within{border-color:var(--chat-accent);}
+.composer-pill textarea{
+  flex:1; min-width:0; background:none; border:none; outline:none; resize:none;
+  color:var(--ink); font-size:14px; font-family:var(--font-body); line-height:1.5;
+  padding:9px 4px; max-height:140px;
+  /* starts hidden so no scrollbar flashes while it's still short — JS
+     (autoResizeComposer) flips this to auto only once the content has
+     actually grown past max-height and needs an internal scroll */
+  overflow-y:hidden;
+  /* compact single-line "input" look by default (line-height + padding =
+     21px + 18px = 39px) — JS expands this on focus and collapses it
+     back on blur, so it only behaves like a growing textarea while
+     you're actually inside it */
+  height:39px;
+  transition:height .15s ease;
+}
+.composer-pill textarea::placeholder{color:var(--ink-dim);}
+.composer-icon-btn{
+  width:34px; height:34px; border-radius:50%; background:none; border:none; color:var(--ink-dim);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-bottom:2px; transition:.15s; cursor:pointer;
+}
+.composer-icon-btn:hover{color:var(--chat-accent); background:var(--accent-soft);}
+/* ---- sized to match the composer-pill's own resting height (6px*2
+   padding + the textarea's 39px collapsed height ≈ 51px), so the tap
+   target is as big as the input box next to it instead of looking
+   small against it. ---- */
+.composer button#sendBtn{width:50px; height:50px; border-radius:50%; background:var(--chat-accent); color:var(--chat-accent-ink); border:none; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:.15s; position:relative; touch-action:none;}
+.composer button#sendBtn:hover{filter:brightness(1.08);}
+/* ---- mic <-> send <-> check crossfade: all three icons sit stacked on
+   top of each other; only their opacity/scale toggles. Mic shows by
+   default (empty composer, not recording); send shows once there's
+   text (has-text, from updateSendButtonIcon in script.js); check shows
+   instead of either while a voice note is being recorded (is-recording
+   on #composer, from the voice-recording block in script.js) — tapping
+   it then means "stop and send this recording". ---- */
+.composer button#sendBtn .send-icon{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  transition:opacity .18s ease, transform .18s ease;
+}
+.composer button#sendBtn .send-icon-mic{opacity:1; transform:scale(1) rotate(0deg);}
+.composer button#sendBtn .send-icon-send{opacity:0; transform:scaleX(-1) scale(.4) rotate(35deg);}
+.composer button#sendBtn .send-icon-check{opacity:0; transform:scale(.4);}
+.composer button#sendBtn.has-text .send-icon-mic{opacity:0; transform:scale(.4) rotate(-35deg);}
+.composer button#sendBtn.has-text .send-icon-send{opacity:1; transform:scaleX(-1) scale(1) rotate(0deg);}
+.composer.is-recording button#sendBtn .send-icon-mic,
+.composer.is-recording button#sendBtn .send-icon-send{opacity:0; transform:scale(.4);}
+.composer.is-recording button#sendBtn .send-icon-check{opacity:1; transform:scale(1);}
+.composer.is-recording button#sendBtn{background:var(--success);}
+
+/* =====================================================================
+   Voice-note recording bar — takes over the .composer-pill's flex slot
+   while recording (see #composer.is-recording in script.js). ×/cancel
+   sits on the near side, then a pulsing red dot + live mm:ss timer,
+   then a hint that adapts to touch vs desktop and to the armed/cancel
+   state.
+   ===================================================================== */
+.recording-bar{
+  display:none; flex:1; align-items:center; gap:10px; min-width:0;
+  border:1px solid var(--card-border); border-radius:26px; padding:8px 14px;
+  background:transparent;
+}
+.composer.is-recording .composer-pill{display:none;}
+.composer.is-recording .recording-bar{display:flex;}
+.voice-cancel-btn{
+  width:26px; height:26px; border-radius:50%; flex-shrink:0; border:none; cursor:pointer;
+  background:var(--input-bg); color:var(--ink-muted);
+  display:flex; align-items:center; justify-content:center; transition:.15s;
+}
+.voice-cancel-btn:hover{color:var(--ink);}
+.composer.cancel-armed .voice-cancel-btn{background:var(--error); color:#fff; transform:scale(1.12);}
+.recording-dot{
+  width:9px; height:9px; border-radius:50%; background:var(--error); flex-shrink:0;
+  animation:recordingPulse 1.1s ease-in-out infinite;
+}
+@keyframes recordingPulse{
+  0%, 100%{opacity:1; transform:scale(1);}
+  50%{opacity:.4; transform:scale(.8);}
+}
+.recording-timer{font-family:var(--font-mono); font-size:13px; color:var(--ink); flex-shrink:0;}
+.recording-hint{font-size:12px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.composer.cancel-armed .recording-hint{color:var(--error);}
+
+/* =====================================================================
+   Voice message bubble — a play/pause button, a thin progress track,
+   and the current/total time, laid out like a compact audio player
+   inside the normal .msg bubble.
+   ===================================================================== */
+.msg-voice{display:flex; align-items:center; gap:9px; min-width:190px;}
+.voice-play-btn{
+  width:32px; height:32px; border-radius:50%; flex-shrink:0; border:none; cursor:pointer;
+  background:var(--chat-accent); color:var(--chat-accent-ink);
+  display:flex; align-items:center; justify-content:center;
+}
+.voice-play-btn svg{width:16px; height:16px; display:block;}
+.voice-play-btn:disabled{opacity:.5; cursor:default;}
+.voice-track{flex:1; min-width:0; height:4px; border-radius:2px; background:rgba(128,128,128,.28); position:relative; overflow:hidden;}
+.voice-track-fill{position:absolute; inset:0 auto 0 0; width:0%; background:var(--chat-accent); border-radius:2px; transition:width .1s linear;}
+.msg.in .voice-track-fill{background:var(--chat-accent);}
+.voice-time{font-family:var(--font-mono); font-size:11px; color:inherit; opacity:.8; flex-shrink:0; white-space:nowrap;}
+
+/* ---- pinned message banner (top of chat) ---- */
+.pinned-banner{
+  display:flex; align-items:center; gap:8px; padding:5px 18px; background:var(--input-bg);
+  border-bottom:1px solid var(--card-border); cursor:pointer; transition:.15s;
+}
+.pinned-banner:hover{background:var(--accent-soft);}
+.pinned-banner.hidden{display:none;}
+.pinned-banner-icon{color:var(--chat-accent); flex-shrink:0; display:flex;}
+.pinned-banner-body{flex:1; min-width:0; display:flex; align-items:baseline; gap:5px; white-space:nowrap; overflow:hidden;}
+.pinned-banner-body strong{font-size:11px; color:var(--chat-accent); font-weight:700; flex-shrink:0;}
+.pinned-banner-body span{font-size:11.5px; color:var(--ink-muted); overflow:hidden; text-overflow:ellipsis;}
+.pinned-banner-dashes{display:flex; flex-direction:column; justify-content:center; gap:2px; flex-shrink:0; padding-inline-start:6px; max-height:20px;}
+.pinned-banner-dashes.hidden{display:none;}
+.pin-dash{width:3px; height:3px; border-radius:2px; background:var(--card-border); transition:.15s;}
+.pin-dash.active{background:var(--chat-accent);}
+
+/* ---- reply preview bar shown above the composer ---- */
+.reply-preview{
+  display:flex; align-items:center; gap:10px; padding:8px 18px; background:var(--input-bg);
+  border-top:1px solid var(--card-border);
+}
+.reply-preview.hidden{display:none;}
+.reply-preview-accent{width:3px; align-self:stretch; border-radius:3px; background:var(--chat-accent); flex-shrink:0;}
+.reply-preview-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;}
+.reply-preview-body strong{font-size:12px; color:var(--chat-accent); font-weight:700;}
+.reply-preview-body span{font-size:12.5px; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+/* ---- right-click / long-press message context menu ---- */
+.msg-menu{
+  position:fixed; z-index:150; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:12px; box-shadow:var(--shadow); padding:6px; min-width:170px;
+  display:flex; flex-direction:column; gap:2px; animation:modalIn .15s ease;
+}
+.msg-menu.hidden{display:none;}
+.msg-menu button{
+  display:flex; align-items:center; gap:9px; background:none; border:none; color:var(--ink);
+  font-size:13.5px; padding:9px 12px; border-radius:8px; cursor:pointer; text-align:right;
+  font-family:var(--font-body); transition:.12s; width:100%;
+}
+.msg-menu button:hover{background:var(--accent-soft); color:var(--chat-accent);}
+.msg-menu button.danger:hover{background:var(--error-soft); color:var(--error);}
+
+/* ---- delete choice modal ---- */
+.delete-overlay{
+  position:fixed; inset:0; z-index:170; background:rgba(6,9,16,.55); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:20px; transition:opacity .2s;
+}
+.delete-overlay.hidden{opacity:0; pointer-events:none;}
+.delete-panel{
+  width:100%; max-width:340px; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:18px; box-shadow:var(--shadow); padding:22px 20px; text-align:center;
+  animation: modalIn .25s cubic-bezier(.2,.8,.2,1);
+}
+.delete-panel h3{margin:0 0 8px; font-size:16px;}
+.delete-panel p{margin:0 0 18px; font-size:13px; color:var(--ink-muted); line-height:1.6;}
+.delete-panel .secondary-btn{margin-bottom:8px; cursor:pointer;}
+.delete-panel .secondary-btn:last-child{margin-bottom:0;}
+.delete-panel .danger-btn{color:var(--error); border-color:var(--error-soft);}
+.delete-panel .danger-btn:hover{background:var(--error-soft); border-color:var(--error);}
+.delete-panel .danger-btn.hidden{display:none;}
+.delete-panel input[type="password"]{
+  width:100%; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:10px;
+  color:var(--ink); font-size:14px; padding:10px 12px; margin-bottom:6px; outline:none; transition:.15s;
+  text-align:center; font-family:var(--font-body);
+}
+.delete-panel input[type="password"]:focus{border-color:var(--error); background:var(--error-soft);}
+.delete-panel .auth-error{margin:0 0 10px; min-height:14px;}
+
+/* ---- Wasla AI opinion modal ---- */
+.ai-opinion-panel{max-width:380px; text-align:right;}
+.ai-opinion-panel h3{text-align:center;}
+.ai-opinion-panel > #aiOpinionForm > p{text-align:center;}
+.ai-opinion-panel .primary-btn{width:100%; margin-bottom:8px; cursor:pointer;}
+.ai-opinion-success{display:flex; flex-direction:column; align-items:center; gap:10px; padding:10px 0; color:var(--success, #4ade80);}
+.ai-opinion-success p{margin:0; color:var(--ink); font-size:14.5px; font-weight:700;}
+.ai-opinion-success.hidden{display:none;}
+
+/* ---- Blank admin page: Wasla AI feedback table ---- */
+.admin-page{
+  position:fixed; inset:0; z-index:300; background:var(--bg, #0a0f1c);
+  overflow-y:auto; padding:40px 24px;
+}
+.admin-page.hidden{display:none;}
+.admin-page-inner{max-width:760px; margin:0 auto;}
+.admin-page-inner h2{margin:0 0 20px; font-size:20px;}
+.admin-table{width:100%; border-collapse:collapse; font-size:13.5px;}
+.admin-table th, .admin-table td{padding:10px 12px; text-align:right; border-bottom:1px solid var(--card-border);}
+.admin-table th{color:var(--ink-muted); font-weight:700; font-size:12.5px;}
+.admin-table td{color:var(--ink); vertical-align:top;}
+.admin-table td.fb-id{font-family:var(--font-mono); direction:ltr; text-align:right; white-space:nowrap;}
+.admin-table td.fb-reaction{font-size:16px; text-align:center;}
+
+
+/* =====================================================================
+   4) SETTINGS PANEL — custom-built, not a bare icon
+   ===================================================================== */
+.settings-overlay{
+  position:fixed; inset:0; z-index:60; background:rgba(6,9,16,.5); backdrop-filter:blur(4px);
+  display:flex; justify-content:flex-end; transition:opacity .25s;
+}
+.settings-overlay.hidden{opacity:0; pointer-events:none;}
+.settings-panel{
+  width:460px; max-width:92vw; height:100%; background:var(--card-bg); border-right:1px solid var(--card-border);
+  display:flex; flex-direction:column; box-shadow:var(--shadow); animation: panelIn .3s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes panelIn{ from{ transform:translateX(-100%);} to{ transform:translateX(0);} }
+.settings-top{display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--card-border);}
+.settings-top h2{font-size:18px; margin:0;}
+
+.settings-tabs{display:flex; gap:4px; padding:12px 16px 0; overflow-x:auto;}
+.tab-btn{background:none; border:none; color:var(--ink-muted); font-size:12.5px; font-weight:600; padding:9px 12px; border-radius:10px 10px 0 0; white-space:nowrap; border-bottom:2px solid transparent;}
+.tab-btn.active{color:var(--chat-accent); border-bottom-color:var(--chat-accent); background:var(--accent-soft);}
+
+.settings-body{flex:1; overflow-y:auto; padding:20px;}
+.settings-pane{display:none;}
+.settings-pane.active{display:block; animation: fadeIn .2s ease;}
+@keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+.settings-pane h3{font-size:13px; color:var(--ink-muted); margin:22px 0 12px; text-transform:uppercase; letter-spacing:.04em;}
+.settings-pane h3:first-child{margin-top:0;}
+
+.id-chip{display:flex; align-items:center; justify-content:space-between; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:10px 12px;}
+.id-chip span{font-family:var(--font-mono); direction:ltr; letter-spacing:.05em;}
+.id-chip button{background:none; border:none; color:var(--chat-accent); font-size:12px; font-weight:700;}
+
+.theme-toggle-row{display:flex; gap:12px;}
+.theme-opt{flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px; border-radius:14px; background:var(--input-bg); border:1.5px solid var(--card-border); color:var(--ink); font-size:12.5px; font-weight:600;}
+.theme-opt.active{border-color:var(--chat-accent); background:var(--accent-soft); color:var(--chat-accent);}
+.theme-swatch{width:38px; height:38px; border-radius:50%; display:block;}
+.theme-swatch.light{background:linear-gradient(135deg,#fff,#e8ecf5); border:1px solid rgba(0,0,0,.08);}
+.theme-swatch.dark{background:linear-gradient(135deg,#141c30,#0a0f1c); border:1px solid rgba(255,255,255,.08);}
+
+.color-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:10px;}
+.color-swatch{aspect-ratio:1; border-radius:50%; border:2px solid transparent; cursor:pointer; transition:.15s;}
+.color-swatch.active{border-color:var(--ink); transform:scale(1.1);}
+
+.custom-color-row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:14px; padding:10px 12px; border-radius:12px; background:var(--input-bg); border:1.5px solid var(--card-border);}
+.custom-color-label{display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink); cursor:pointer;}
+.custom-color-swatch{width:24px; height:24px; border-radius:50%; border:2px solid var(--card-border); flex-shrink:0;}
+#customColorInput{-webkit-appearance:none; appearance:none; width:34px; height:34px; border:none; border-radius:8px; background:none; cursor:pointer; padding:0;}
+#customColorInput::-webkit-color-swatch-wrapper{padding:0;}
+#customColorInput::-webkit-color-swatch{border-radius:8px; border:1.5px solid var(--card-border);}
+
+.privacy-opt-group{display:flex; gap:8px; margin-bottom:18px;}
+.privacy-opt{flex:1; padding:10px 6px; border-radius:12px; background:var(--input-bg); border:1.5px solid var(--card-border); color:var(--ink-muted); font-size:12.5px; font-weight:600; cursor:pointer; transition:.15s;}
+.privacy-opt:hover{border-color:var(--chat-accent);}
+.privacy-opt.active{border-color:var(--chat-accent); background:var(--accent-soft); color:var(--chat-accent);}
+
+/* ---- read-receipts-style toggle row (WhatsApp-like) ---- */
+.settings-toggle-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px;}
+.settings-toggle-text{flex:1; min-width:0;}
+.settings-toggle-text h3{margin:0 0 4px;}
+.settings-toggle-text .hint-text{margin:0;}
+
+.toggle-switch{position:relative; display:inline-block; width:50px; height:29px; flex-shrink:0; cursor:pointer; margin-top:2px;}
+.toggle-switch input{position:absolute; opacity:0; width:0; height:0; margin:0;}
+.toggle-slider{
+  position:absolute; inset:0; background:var(--input-bg); border:1.5px solid var(--card-border);
+  border-radius:999px; transition:background .2s ease, border-color .2s ease;
+}
+.toggle-slider .toggle-knob{
+  position:absolute; top:3px; right:3px; width:21px; height:21px; border-radius:50%;
+  background:var(--ink-muted); display:flex; align-items:center; justify-content:center; color:#fff;
+  transition:transform .2s ease, background .2s ease;
+}
+.toggle-slider .toggle-knob svg{position:absolute; width:11px; height:11px; opacity:0; transition:opacity .15s ease;}
+.toggle-slider .toggle-knob .toggle-icon-off{opacity:1;}
+.toggle-switch input:checked + .toggle-slider{background:var(--success); border-color:var(--success);}
+.toggle-switch input:checked + .toggle-slider .toggle-knob{transform:translateX(-21px); background:#12210f;}
+.toggle-switch input:checked + .toggle-slider .toggle-knob .toggle-icon-on{opacity:1;}
+.toggle-switch input:checked + .toggle-slider .toggle-knob .toggle-icon-off{opacity:0;}
+
+.wallpaper-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px;}
+.wallpaper-opt{aspect-ratio:1; border-radius:12px; border:2px solid var(--card-border); cursor:pointer; overflow:hidden; position:relative;}
+.wallpaper-opt.active{border-color:var(--chat-accent);}
+.wallpaper-opt img{width:100%; height:100%; object-fit:cover;}
+
+.hint-text{font-size:12.5px; color:var(--ink-dim); line-height:1.7; margin:6px 0 14px;}
+.blocked-list{display:flex; flex-direction:column; gap:8px;}
+.blocked-item{display:flex; align-items:center; justify-content:space-between; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:9px 12px; font-size:13px; font-family:var(--font-mono); direction:ltr;}
+.blocked-item button{background:none; border:none; color:var(--error); font-size:12px; font-weight:700; font-family:var(--font-body); direction:rtl;}
+
+/* =====================================================================
+   4.5) PEER PROFILE MODAL + FULLSCREEN IMAGE LIGHTBOX
+   ===================================================================== */
+.profile-overlay{
+  position:fixed; inset:0; z-index:70; background:rgba(6,9,16,.55); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:20px; transition:opacity .25s;
+}
+.profile-overlay.hidden{opacity:0; pointer-events:none;}
+.profile-panel{
+  position:relative; width:100%; max-width:360px; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:22px; box-shadow:var(--shadow); padding:34px 26px 28px; display:flex; flex-direction:column;
+  align-items:center; text-align:center; animation: modalIn .28s cubic-bezier(.2,.8,.2,1);
+}
+.profile-panel .icon-btn{position:absolute; top:14px; left:14px;}
+.profile-avatar-big{
+  width:120px; height:120px; border-radius:50%; background:var(--input-bg); border:none; padding:0;
+  display:flex; align-items:center; justify-content:center; font-size:38px; font-weight:700; color:var(--ink-muted);
+  overflow:hidden; cursor:pointer; flex-shrink:0; margin-bottom:16px; transition:.15s; font-family:var(--font-body);
+}
+.profile-avatar-big:hover{filter:brightness(1.06); transform:scale(1.02);}
+.profile-avatar-big img{width:100%; height:100%; object-fit:cover;}
+/* Name/ID prominence swap: by default (a stranger I haven't saved) the
+   ID is the big/primary line and the name sits small underneath it.
+   Once I save them under my own chosen name, that name becomes the
+   big/primary line and the ID shrinks underneath — driven by the
+   .peer-saved class on the overlay, toggled from JS based on
+   isSavedContact(id), not on whether the peer has an account. */
+.profile-title-block{display:flex; flex-direction:column; align-items:center; text-align:center; gap:3px;}
+.profile-panel h2{margin:0; transition:font-size .15s, color .15s; order:2; font-size:13px; font-weight:600; color:var(--ink-dim); font-family:var(--font-mono);}
+.profile-id-line{transition:font-size .15s, color .15s; order:1; font-size:20px; font-weight:700; color:var(--ink); font-family:var(--font-display); direction:ltr; letter-spacing:.02em; display:flex; align-items:center; justify-content:center; gap:6px;}
+.profile-id-line .profile-id{font:inherit; color:inherit; letter-spacing:inherit;}
+#peerProfileOverlay.peer-saved .profile-panel h2{order:1; font-size:19px; font-weight:700; color:var(--ink); font-family:var(--font-display);}
+#peerProfileOverlay.peer-saved .profile-id-line{order:2; font-size:12px; font-weight:600; color:var(--ink-dim); font-family:var(--font-mono); letter-spacing:.04em;}
+.copy-id-btn{
+  flex-shrink:0; width:20px; height:20px; padding:0; border-radius:6px; border:none; background:transparent;
+  color:inherit; opacity:.6; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s;
+}
+.copy-id-btn:hover{opacity:1; color:var(--chat-accent);}
+.save-contact-btn{
+  margin-top:16px; display:flex; align-items:center; justify-content:center; gap:7px; width:100%;
+  background:var(--chat-accent); color:var(--chat-accent-ink); border:none; border-radius:999px;
+  padding:10px 18px; font-family:var(--font-body); font-size:13px; font-weight:700; cursor:pointer; transition:.2s;
+}
+.save-contact-btn:hover{filter:brightness(1.07);}
+.save-contact-btn.saved{background:var(--input-bg); color:var(--ink-muted); border:1.5px solid var(--card-border);}
+.save-contact-btn.saved:hover{color:var(--error); border-color:var(--error-soft); background:var(--error-soft);}
+.profile-bio-box{width:100%; margin-top:22px; text-align:right;}
+.profile-bio-box h3{font-size:12px; color:var(--ink-muted); text-transform:uppercase; letter-spacing:.04em; margin:0 0 8px;}
+.profile-bio-box p{font-size:13.5px; color:var(--ink); line-height:1.7; margin:0; background:var(--input-bg); border:1px solid var(--card-border); border-radius:12px; padding:12px 14px; word-wrap:break-word;}
+
+/* =====================================================================
+   4.6) FRIENDS PAGE — everyone saved from the peer-profile modal
+   ===================================================================== */
+.save-friend-overlay{
+  position:fixed; inset:0; z-index:170; background:rgba(6,9,16,.55); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:20px; transition:opacity .2s;
+}
+.save-friend-overlay.hidden{opacity:0; pointer-events:none;}
+.save-friend-panel{
+  width:100%; max-width:340px; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:18px; box-shadow:var(--shadow); padding:22px 20px;
+  animation: modalIn .25s cubic-bezier(.2,.8,.2,1);
+}
+.save-friend-panel h3{margin:0 0 16px; font-size:16px; text-align:center;}
+.save-friend-panel .secondary-btn{margin-top:8px; cursor:pointer;}
+
+.friends-overlay{
+  position:fixed; inset:0; z-index:65; background:rgba(6,9,16,.5); backdrop-filter:blur(4px);
+  display:flex; justify-content:flex-end; transition:opacity .25s;
+}
+.friends-overlay.hidden{opacity:0; pointer-events:none;}
+.friends-panel{
+  width:420px; max-width:92vw; height:100%; background:var(--card-bg); border-right:1px solid var(--card-border);
+  display:flex; flex-direction:column; box-shadow:var(--shadow); animation: panelIn .3s cubic-bezier(.2,.8,.2,1);
+}
+.friends-top{display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--card-border);}
+.friends-top h2{font-size:18px; margin:0;}
+.friends-body{flex:1; overflow-y:auto; padding:16px 20px 24px;}
+.friends-list{display:flex; flex-direction:column; gap:6px;}
+.friend-item{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:14px; cursor:pointer; transition:.15s; min-width:0;}
+.friend-item:hover{background:var(--input-bg);}
+.friend-item .avatar{flex-shrink:0;}
+.friend-item .fi-info{flex:1; min-width:0; max-width:100%; overflow:hidden; display:flex; flex-direction:column; justify-content:center;}
+.friend-item .fi-info strong{display:block; min-width:0; max-width:100%; font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700;}
+.friend-item .fi-info span{display:block; min-width:0; max-width:100%; font-size:11.5px; color:var(--ink-dim); font-family:var(--font-mono); direction:ltr; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+/* ---- Wasla AI entry point, pinned under the friends list ---- */
+.ai-friend-btn{
+  display:flex; align-items:center; gap:10px; margin:0 20px 16px; padding:12px 14px;
+  border-radius:14px; border:1px dashed var(--accent-soft); background:transparent;
+  color:var(--ink); font-size:14.5px; font-weight:700; cursor:pointer; transition:.15s;
+  flex-shrink:0;
+}
+.ai-friend-btn:hover{background:var(--accent-soft); border-style:solid;}
+.ai-friend-btn .logo-dot{flex-shrink:0;}
+
+/* ---- like / dislike row under each AI reply ---- */
+.ai-feedback-row{display:flex; gap:6px; align-self:flex-end; justify-content:flex-end; margin:-8px 4px 4px 0;}
+.ai-feedback-btn{
+  display:flex; align-items:center; justify-content:center; width:26px; height:26px;
+  border-radius:50%; border:none; background:transparent; color:var(--ink-dim);
+  cursor:pointer; transition:.15s; padding:0;
+}
+.ai-feedback-btn svg{width:14px; height:14px;}
+.ai-feedback-btn:hover{background:var(--input-bg); color:var(--ink);}
+.ai-feedback-btn.active[data-fb="like"]{color:#2fae60; background:rgba(47,174,96,.14);}
+.ai-feedback-btn.active[data-fb="dislike"]{color:#e0554f; background:rgba(224,85,79,.14);}
+
+.lightbox{
+  position:fixed; inset:0; z-index:80; background:rgba(4,6,10,.92);
+  display:flex; align-items:center; justify-content:center; padding:30px; cursor:zoom-out;
+  transition:opacity .2s;
+}
+.lightbox.hidden{opacity:0; pointer-events:none;}
+.lightbox img{max-width:min(90vw,560px); max-height:88vh; border-radius:12px; object-fit:contain; box-shadow:0 30px 90px -20px rgba(0,0,0,.8);}
+.lightbox-close{
+  position:absolute; top:18px; left:18px; width:38px; height:38px; border-radius:50%;
+  background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15); color:#fff;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+
+/* =====================================================================
+   Toast
+   ===================================================================== */
+.toast{
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+  background:var(--card-bg); border:1px solid var(--card-border); color:var(--ink);
+  padding:11px 20px; border-radius:999px; font-size:13px; box-shadow:var(--shadow); z-index:200;
+  transition:opacity .25s, transform .25s;
+}
+.toast.hidden{opacity:0; transform:translate(-50%,10px); pointer-events:none;}
+
+/* ================= Emoji picker =================
+   Phone only (up to 767px, single-pane view): a bottom sheet that
+   covers the lower part of the screen, like a second "keyboard".
+   Tablet & desktop (768px+, i.e. as soon as the layout is already
+   split into the two-pane sidebar + chat view): a smaller floating
+   popover anchored near the emoji button instead. */
+.emoji-panel{
+  position:fixed; left:0; right:0; bottom:0;
+  height:min(48vh, 420px);
+  background:var(--card-bg); border-top:1px solid var(--card-border);
+  border-radius:18px 18px 0 0; box-shadow:0 -20px 50px -20px rgba(0,0,0,.55);
+  z-index:130; display:flex; flex-direction:column; overflow:hidden;
+  /* closed by default: invisible + non-interactive, but no display:none,
+     so it's free to fade via opacity where that's wanted (desktop) —
+     on phone/tablet there's simply no transition set, so this is still
+     an instant show/hide, same as before */
+  opacity:0; visibility:hidden; pointer-events:none;
+}
+/* the "open" class (not "hidden") is used on purpose here — this panel
+   needs an opacity/visibility toggle to support fading, and the site's
+   shared ".hidden" utility class forces display:none !important, which
+   would kill that transition outright */
+.emoji-panel.open{opacity:1; visibility:visible; pointer-events:auto;}
+.emoji-panel-handle{
+  width:36px; height:4px; border-radius:3px; background:var(--card-border);
+  margin:10px auto 4px; flex-shrink:0; cursor:pointer;
+}
+.emoji-panel-search{
+  display:flex; align-items:center; gap:8px; margin:4px 14px 8px;
+  background:var(--input-bg); border:1px solid var(--card-border); border-radius:12px;
+  padding:8px 12px; color:var(--ink-dim); flex-shrink:0;
+}
+.emoji-panel-search input{
+  flex:1; min-width:0; background:none; border:none; outline:none; color:var(--ink);
+  font-size:13.5px; font-family:var(--font-body);
+}
+.emoji-panel-search input::placeholder{color:var(--ink-dim);}
+.emoji-panel-tabs{
+  display:flex; gap:2px; overflow-x:auto; padding:0 10px 8px; flex-shrink:0;
+  border-bottom:1px solid var(--card-border);
+}
+.emoji-panel-tabs::-webkit-scrollbar{display:none;}
+.emoji-panel-tabs button{
+  flex-shrink:0; width:34px; height:34px; border-radius:9px; background:none; border:none;
+  font-size:17px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+  opacity:.5; transition:.15s; font-family:var(--font-body);
+}
+.emoji-panel-tabs button:hover{opacity:.85; background:var(--input-bg);}
+.emoji-panel-tabs button.active{opacity:1; background:var(--accent-soft);}
+.emoji-panel-body{flex:1; overflow-y:auto; padding:4px 10px 14px;}
+.emoji-panel-section-title{
+  font-size:11.5px; font-weight:700; color:var(--ink-dim); margin:10px 4px 6px;
+  font-family:var(--font-body);
+}
+.emoji-panel-grid{display:grid; grid-template-columns:repeat(8, 1fr); gap:2px;}
+.emoji-panel-grid button{
+  aspect-ratio:1/1; display:flex; align-items:center; justify-content:center;
+  font-size:23px; background:none; border:none; border-radius:8px; cursor:pointer;
+  transition:transform .1s, background .1s; line-height:1;
+}
+.emoji-panel-grid button:hover{background:var(--input-bg); transform:scale(1.15);}
+.emoji-panel-empty{color:var(--ink-dim); font-size:13px; text-align:center; padding:30px 10px;}
+
+@media (min-width:768px){
+  .emoji-panel{
+    position:absolute; left:auto; right:16px; bottom:78px; top:auto;
+    width:360px; height:420px; border-radius:16px; border:1px solid var(--card-border);
+    box-shadow:var(--shadow);
+    transform:translateY(6px);
+    transition:opacity .3s ease, transform .3s ease, visibility 0s linear .3s;
+  }
+  .emoji-panel.open{
+    transform:translateY(0);
+    transition:opacity .3s ease, transform .3s ease, visibility 0s linear 0s;
+  }
+  .emoji-panel-handle{display:none;}
+  .emoji-panel-grid{grid-template-columns:repeat(7, 1fr);}
+}
+
+/* tablet (768–1199px): same floating popover, just a touch smaller
+   since the chat pane itself is narrower here than on full desktop */
+@media (min-width:768px) and (max-width:1199px){
+  .emoji-panel{width:300px; height:360px; right:12px;}
+  .emoji-panel-grid{grid-template-columns:repeat(6, 1fr);}
+}
+
+/* scrollbars */
+.chat-list::-webkit-scrollbar, .messages::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .composer-pill textarea::-webkit-scrollbar, .emoji-panel-body::-webkit-scrollbar{width:6px;}
+.chat-list::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .composer-pill textarea::-webkit-scrollbar-thumb, .emoji-panel-body::-webkit-scrollbar-thumb{background:var(--scrollbar); border-radius:6px;}
+.chat-list::-webkit-scrollbar-track, .messages::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .composer-pill textarea::-webkit-scrollbar-track, .emoji-panel-body::-webkit-scrollbar-track{background:transparent;}
+/* just the thumb, no up/down arrow buttons at the ends */
+.chat-list::-webkit-scrollbar-button, .messages::-webkit-scrollbar-button, .settings-body::-webkit-scrollbar-button, .composer-pill textarea::-webkit-scrollbar-button, .emoji-panel-body::-webkit-scrollbar-button{display:none; width:0; height:0;}
+.chat-list, .messages, .settings-body, .composer-pill textarea, .emoji-panel-body{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+
+/* settings tabs: keep scrollable (swipe/wheel still works), just hide the scrollbar itself */
+.settings-tabs::-webkit-scrollbar{width:0; height:0; display:none;}
+.settings-tabs{scrollbar-width:none; -ms-overflow-style:none;}
+.settings-tabs.dragging{user-select:none;}
+.composer-pill textarea::-webkit-scrollbar-track{background:transparent;}
+.composer-pill textarea{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+
+/* =====================================================================
+   5) RESPONSIVE — distinct layouts per device
+   ===================================================================== */
+
+/* ---- Desktop (default above): full two-pane layout, wide sidebar ---- */
+@media (min-width:1200px){
+  .sidebar{width:400px;}
+  .messages{padding:26px 60px;}
+  .msg{max-width:52%;}
+
+  /* ---- gate: computer shape — description panel on the side ---- */
+  .gate-side{display:flex; flex-direction:column;}
+  .gate-card{padding:32px 30px 26px;}
+
+  /* ---- auth: same compact design as the iPad ---- */
+  .auth-card{max-width:440px; padding:20px 22px 42px; text-align:right;}
+  .auth-logo{justify-content:flex-start; font-size:19px; margin-bottom:10px;}
+  .auth-card h1{font-size:17px; margin-bottom:3px;}
+  .auth-sub{font-size:12px; line-height:1.5; margin-bottom:10px;}
+  #authPane-register.active{
+    display:grid;
+    grid-template-columns:96px 1fr;
+    grid-template-areas:
+      "title title"
+      "sub   sub"
+      "avatar name"
+      "avatar bio"
+      "avatar password"
+      "btn   btn";
+    column-gap:14px;
+    row-gap:6px;
+    align-items:start;
+  }
+  #authPane-register.active h1{grid-area:title; margin-top:0;}
+  #authPane-register.active .auth-sub{grid-area:sub;}
+  #authPane-register.active .avatar-picker{grid-area:avatar; margin-bottom:0; gap:6px;}
+  #authPane-register.active .avatar-preview{width:58px; height:58px; font-size:20px;}
+  #authPane-register.active .avatar-upload-btn{font-size:10.5px; padding:4px 10px;}
+  #authPane-register.active .field-name{grid-area:name; margin-bottom:0;}
+  #authPane-register.active .field-bio{grid-area:bio; margin-bottom:0;}
+  #authPane-register.active .field-bio textarea{min-height:36px;}
+  #authPane-register.active .field-password{grid-area:password; margin-bottom:0;}
+  #authPane-register.active #registerBtn{grid-area:btn; margin-top:8px;}
+  #authPane-register.active .field label{margin-bottom:3px; font-size:11.5px;}
+  #authPane-register.active .field input, #authPane-register.active .field textarea{padding:8px 10px; font-size:13px;}
+  #authPane-login.active{max-width:320px; margin:0 auto;}
+}
+
+/* ---- Tablet: narrower sidebar, both panes still visible ---- */
+@media (min-width:768px) and (max-width:1199px){
+  .sidebar{width:320px;}
+  .me-info strong{max-width:110px;}
+  .my-id{max-width:110px;}
+  .messages{padding:18px 24px;}
+  .msg{max-width:70%;}
+  .settings-panel{width:400px;}
+
+  /* ---- gate: tablet shape — no side panel, wider card ---- */
+  .gate-card{max-width:500px; padding:32px 30px 26px;}
+
+  /* ---- auth: same idea as desktop, just slimmer and smaller — compact so it fits with no scroll ---- */
+  .auth-card{max-width:440px; padding:20px 22px 42px; text-align:right;}
+  .auth-logo{justify-content:flex-start; font-size:19px; margin-bottom:10px;}
+  .auth-card h1{font-size:17px; margin-bottom:3px;}
+  .auth-sub{font-size:12px; line-height:1.5; margin-bottom:10px;}
+  #authPane-register.active{
+    display:grid;
+    grid-template-columns:96px 1fr;
+    grid-template-areas:
+      "title title"
+      "sub   sub"
+      "avatar name"
+      "avatar bio"
+      "avatar password"
+      "btn   btn";
+    column-gap:14px;
+    row-gap:6px;
+    align-items:start;
+  }
+  #authPane-register.active h1{grid-area:title; margin-top:0;}
+  #authPane-register.active .auth-sub{grid-area:sub;}
+  #authPane-register.active .avatar-picker{grid-area:avatar; margin-bottom:0; gap:6px;}
+  #authPane-register.active .avatar-preview{width:58px; height:58px; font-size:20px;}
+  #authPane-register.active .avatar-upload-btn{font-size:10.5px; padding:4px 10px;}
+  #authPane-register.active .field-name{grid-area:name; margin-bottom:0;}
+  #authPane-register.active .field-bio{grid-area:bio; margin-bottom:0;}
+  #authPane-register.active .field-bio textarea{min-height:36px;}
+  #authPane-register.active .field-password{grid-area:password; margin-bottom:0;}
+  #authPane-register.active #registerBtn{grid-area:btn; margin-top:8px;}
+  #authPane-register.active .field label{margin-bottom:3px; font-size:11.5px;}
+  #authPane-register.active .field input, #authPane-register.active .field textarea{padding:8px 10px; font-size:13px;}
+  #authPane-login.active{max-width:320px; margin:0 auto;}
+}
+
+/* ---- Mobile: single-pane, toggle between list and active chat ---- */
+@media (max-width:767px){
+  .sidebar{width:100%; border-left:none;}
+  .chat-window{position:absolute; inset:0; width:100%; transform:translateX(100%); transition:transform .28s ease; background:var(--bg);}
+  .app.chat-open .sidebar{display:none;}
+  .app.chat-open .chat-window{transform:translateX(0);}
+  .back-btn{display:flex;}
+  .messages{padding:14px 12px;}
+  .msg{max-width:82%; font-size:13.5px;}
+  .settings-panel{width:100%; max-width:100%;}
+  .friends-panel{width:100%; max-width:100%;}
+  .save-friend-panel{max-width:100%;}
+  .settings-tabs{padding:10px 10px 0;}
+  .composer{padding:10px 12px;}
+  .sidebar-header{padding:14px;}
+  .search-box{margin:12px;}
+  .color-grid{grid-template-columns:repeat(5,1fr);}
+
+  /* ---- gate: phone shape — compact single column, no side panel ---- */
+  .gate-card{padding:22px 16px 18px;}
+  .shape-pool-btn{width:48px; height:48px;}
+  .shape-chip{width:36px; height:36px;}
+  .shape-slot{width:34px; height:34px;}
+  .gate-side{display:none;}
+
+  .auth-screen{padding:0; overflow-y:auto;}
+  .auth-card{
+    width:100%; min-height:100%; max-width:none; max-height:none; margin:auto;
+    border-radius:0; border:none; box-shadow:none; background:var(--card-bg);
+    padding:28px 22px; display:flex; flex-direction:column; justify-content:center;
+  }
+  .auth-logo{font-size:20px; margin-bottom:16px;}
+  .auth-card h1{font-size:19px; margin-bottom:6px;}
+  .auth-sub{font-size:13px; margin-bottom:18px;}
+  .avatar-picker{margin-bottom:14px;}
+  .avatar-preview{width:72px; height:72px;}
+  .field{margin-bottom:12px;}
+  .field textarea{min-height:52px;}
+}
