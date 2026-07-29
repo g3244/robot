@@ -40,6 +40,16 @@ let visibleChatPeerIds = [];     // peer ids that currently have a non-deleted c
 
 /* ---- message extras: reply / pin / context menu state ---- */
 let messagesData = {};           // messageId -> message data, for the open chat only
+/* tempId -> the actual DOM node for a bubble that's still "sending"
+   (typed text, or a voice note still uploading to Storage). The messages
+   onSnapshot handler below wipes and rebuilds #messages from scratch on
+   every change, which would otherwise throw these away mid-flight (e.g.
+   while a voice note is still uploading and some unrelated change, like
+   the other side's read receipt, fires the listener first) — so it puts
+   any node still in here back after every rebuild. Entries are removed
+   the moment their real Firestore doc is written (success) or the send
+   fails (see removePendingMessageBubble). */
+let pendingBubbleNodes = new Map();
 let replyingTo = null;           // {id, senderId, text} snippet of the message being replied to
 let currentPinnedId = null;      // id of the currently pinned message in the open chat
 let contextMenuMsgId = null;     // message the right-click / long-press menu currently targets
@@ -1861,6 +1871,15 @@ async function markPeerMessagesRead(snapDocs, peerId){
 }
 
 async function openChat(peer){
+  /* already sitting in this exact conversation — closeActiveChat() (the
+     mobile back button) is what actually tears down the listeners and
+     nulls activeChatPeer, so if it's still set to this same peer, we're
+     genuinely already open and there's nothing to do. Without this,
+     re-clicking the same person in the list unsubscribed + resubscribed
+     both listeners and wiped/rebuilt the whole message list from
+     scratch for no reason, flashing the "جاري تحميل الرسائل..." loader
+     over a chat that was already fully loaded. */
+  if(activeChatPeer && activeChatPeer.id === peer.id) return;
   closePeerProfile();
   const previousPeerId = activeChatPeer ? activeChatPeer.id : null;
   if(!peer.uid){
@@ -1931,6 +1950,7 @@ async function openChat(peer){
   clearReplyState();
   hideDeletedForMeBar();
   messagesData = {};
+  pendingBubbleNodes.clear();
   exitSelectionMode();
 
   if(chatDocUnsub) chatDocUnsub();
@@ -1960,6 +1980,14 @@ async function openChat(peer){
   const msgsBox = $("#messages");
   msgsBox.innerHTML = `<p class="hint-text" style="text-align:center;">جاري تحميل الرسائل...</p>`;
   $("#scrollToBottomBtn").classList.remove("hidden", "stbb-show");
+  /* every snapshot rebuilds ALL bubbles from scratch (see below), so
+     without this, any unrelated change anywhere in the chat (someone
+     else's message arriving, a read-receipt tick updating, etc.) would
+     make every single reaction badge in the whole conversation replay
+     its pop-in animation together. This remembers what each message's
+     reactions looked like last time, so only the one that actually
+     changed gets to animate on the next redraw. */
+  let reactionsRenderCache = {};
   msgUnsub = db.collection("chats").doc(activeChatId).collection("messages")
     .orderBy("ts","asc")
     .onSnapshot(snap=>{
@@ -2028,6 +2056,16 @@ async function openChat(peer){
           inner += `</span>`;
         }
         bubble.innerHTML = inner;
+        if(!m.deletedForEveryone){
+          const reactionsSig = m.reactions ? JSON.stringify({r: m.reactions, o: m.reactionOrder || null}) : null;
+          const reactionsChanged = reactionsRenderCache[doc.id] !== reactionsSig;
+          reactionsRenderCache[doc.id] = reactionsSig;
+          const reactionsBadge = reactionsBadgeHTML(m, doc.id, reactionsChanged);
+          if(reactionsBadge){
+            bubble.insertAdjacentHTML("beforeend", reactionsBadge);
+            bubble.classList.add("has-reactions");
+          }
+        }
         msgsBox.appendChild(bubble);
 
         if(m.senderId === AI_PEER_ID && !m.deletedForEveryone && !hasGivenAiOpinion()){
@@ -2040,6 +2078,16 @@ async function openChat(peer){
           msgsBox.appendChild(fbRow);
         }
       });
+      /* same problem as the typing indicator below: the rebuild above
+         just wiped #messages including any bubble that's still "sending"
+         (typed text still writing to Firestore, or — much more likely to
+         actually be caught mid-flight — a voice note still uploading to
+         Storage). Put those back too, or a slow voice upload can get
+         wiped by any unrelated update to this chat (a read receipt, a
+         reaction, the other person's message) before it ever gets the
+         chance to be replaced by its real bubble, making it look like
+         the message vanished into thin air. */
+      pendingBubbleNodes.forEach(node=> msgsBox.appendChild(node));
       /* the rebuild above just wiped #messages including the typing
          bubble (if it was there) — put it straight back, no animation
          needed since it was already visible a moment ago */
@@ -2386,7 +2434,7 @@ function openPinnedMenu(x, y){
   if(!currentPinnedId) return;
   const menu = $("#pinnedMenu");
   menu.classList.remove("hidden");
-  const menuW = 180, menuH = 44;
+  const { width: menuW, height: menuH } = menu.getBoundingClientRect();
   let left = x, top = y;
   if(left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
   if(top + menuH > window.innerHeight) top = window.innerHeight - menuH - 10;
@@ -2649,6 +2697,185 @@ $("#deleteForEveryoneBtn").addEventListener("click", async ()=>{
 });
 
 /* =====================================================================
+   6.3b) MESSAGE REACTIONS — a small emoji picker that pops up above the
+   press point on a long-press (phone/iPad) or fixed above the context
+   menu on a right-click (desktop). One reaction per person per message,
+   stored as { [userId]: emoji } on the message doc; tapping the same
+   emoji you already picked removes it again.
+   ===================================================================== */
+const QUICK_REACTIONS = ["👍","❤️","😂","😮","😢","🙏"];
+const EXTRA_REACTIONS = ["🥲","😡","🎉","🔥","👏","😍","🤔","😴","🙌","💯","🤦","🥳","😬","🤝","😱","👀","🙄","💔","😅","🤩","😭","🫶","🥸","👌"];
+
+let reactionBarMsgId = null;
+
+function reactionsBadgeHTML(m, id, animate){
+  if(!m.reactions) return "";
+  const entries = Object.entries(m.reactions);
+  if(!entries.length) return "";
+  const counts = {};
+  entries.forEach(([, emo])=>{ counts[emo] = (counts[emo] || 0) + 1; });
+  /* reactionOrder holds user ids from oldest → most-recent action (see
+     setReaction); walking it backwards and keeping the first time we
+     see each emoji puts whichever emoji was reacted with most recently
+     — by anyone — first in the chip list. Older docs saved before this
+     field existed just fall back to whatever order Object.entries gives. */
+  const recencyIds = Array.isArray(m.reactionOrder) && m.reactionOrder.length
+    ? m.reactionOrder
+    : entries.map(([uid])=>uid);
+  const order = [];
+  const seen = new Set();
+  for(let i = recencyIds.length - 1; i >= 0; i--){
+    const emo = m.reactions[recencyIds[i]];
+    if(!emo || seen.has(emo)) continue;
+    seen.add(emo);
+    order.push(emo);
+  }
+  const mine = m.reactions[currentUser.id];
+  const chips = order.map(emo=> emo + (counts[emo] > 1 ? `<span class="msg-reactions-count">${counts[emo]}</span>` : "")).join("");
+  return `<div class="msg-reactions${mine ? " mine" : ""}${animate ? " reaction-pop" : ""}" data-id="${id}">${chips}</div>`;
+}
+
+/* positions a floating panel so its BOTTOM sits just above (anchorX,
+   anchorY) — e.g. above the exact spot a finger pressed, or above the
+   context menu's top edge — flipping to appear below instead if there
+   isn't enough room above, and clamped so it never runs off-screen */
+function positionFloatingEl(el, anchorX, anchorY){
+  const rect = el.getBoundingClientRect();
+  let left = anchorX - rect.width / 2;
+  let top = anchorY - rect.height - 10;
+  if(left < 8) left = 8;
+  if(left + rect.width > window.innerWidth - 8) left = window.innerWidth - rect.width - 8;
+  if(top < 8) top = anchorY + 10;
+  /* the flip-to-below case above didn't check the bottom edge, so on a
+     short/narrow browser window the panel could still spill past the
+     bottom (or, after the left/right clamp ran before top was decided,
+     past the right/left edge too). Re-clamp both axes against the
+     actual window size so the panel always stays fully inside the
+     visible browser viewport. */
+  if(top + rect.height > window.innerHeight - 8) top = window.innerHeight - rect.height - 8;
+  if(left + rect.width > window.innerWidth - 8) left = window.innerWidth - rect.width - 8;
+  el.style.left = Math.max(8, left) + "px";
+  el.style.top = Math.max(8, top) + "px";
+}
+
+function openReactionBar(msgId, anchorX, anchorY){
+  const m = messagesData[msgId];
+  if(!m || m.deletedForEveryone) return;
+  reactionBarMsgId = msgId;
+  closeReactionGrid();
+  const bar = $("#reactionBar");
+  const mine = m.reactions && m.reactions[currentUser.id];
+  $$(".reaction-bar-emoji", bar).forEach(b=> b.classList.toggle("active", b.dataset.emoji === mine));
+  bar.classList.remove("hidden");
+  positionFloatingEl(bar, anchorX, anchorY);
+}
+function closeReactionGrid(){ $("#reactionGrid").classList.add("hidden"); }
+function closeReactionBar(){
+  $("#reactionBar").classList.add("hidden");
+  closeReactionGrid();
+  reactionBarMsgId = null;
+  if(emojiPanelReactionMode) closeEmojiPanel();
+}
+
+async function setReaction(msgId, emoji){
+  if(!activeChatId) return;
+  const m = messagesData[msgId];
+  if(!m || m.deletedForEveryone) return;
+  const current = m.reactions && m.reactions[currentUser.id];
+  const ref = db.collection("chats").doc(activeChatId).collection("messages").doc(msgId);
+  /* drop any earlier occurrence of me from the order first — for the
+     "add/change" case below I then get re-added at the end (= most
+     recent reactor); for the "remove" case I just stay out of it.
+     Computed locally so the whole reaction change is ONE write instead
+     of several — several separate awaited writes each fire their own
+     snapshot update, which was making the badge flicker (pop away,
+     pop back) a few times before settling on its final state. */
+  const restOfOrder = Array.isArray(m.reactionOrder) ? m.reactionOrder.filter(uid=> uid !== currentUser.id) : [];
+  try{
+    if(current === emoji){
+      await ref.update({
+        [`reactions.${currentUser.id}`]: firebase.firestore.FieldValue.delete(),
+        reactionOrder: restOfOrder
+      });
+    } else {
+      await ref.set({
+        reactions: { [currentUser.id]: emoji },
+        reactionOrder: [...restOfOrder, currentUser.id]
+      }, {merge:true});
+    }
+  }catch(err){ console.error(err); toast("تعذر إضافة الريأكشن", true); }
+}
+
+async function applyReaction(msgId, emoji){
+  await setReaction(msgId, emoji);
+  closeReactionBar();
+  if(contextMenuMsgId === msgId) closeMsgMenu();
+  if(isSelectionMode()) exitSelectionMode();
+}
+
+$("#reactionBar").addEventListener("click", (e)=>{
+  const btn = e.target.closest(".reaction-bar-emoji");
+  if(!btn || !reactionBarMsgId) return;
+  applyReaction(reactionBarMsgId, btn.dataset.emoji);
+});
+
+$("#reactionBarMore").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  if(!reactionBarMsgId) return;
+  closeMsgMenu();
+
+  /* tapping "+" again while the picker it opened is still up just
+     closes it back down, the same toggle feel the old small grid had */
+  if(emojiPanelOpen && emojiPanelReactionMode){
+    closeEmojiPanel();
+    closeReactionBar();
+    return;
+  }
+
+  /* same full emoji picker the composer's own emoji button uses
+     (search + category tabs + all emoji), on both phone and desktop —
+     on phone this also closes the keyboard and hides the composer
+     input while it's up; on desktop it's the same side popover next
+     to the composer, in its usual fixed spot */
+  if(window.innerWidth < 768 && document.activeElement && document.activeElement !== document.body){
+    document.activeElement.blur();
+  }
+  $("#reactionBar").classList.add("hidden");
+  openEmojiPanel(true);
+});
+
+$("#reactionGrid").addEventListener("click", (e)=>{
+  const btn = e.target.closest("button[data-emoji]");
+  if(!btn || !reactionBarMsgId) return;
+  applyReaction(reactionBarMsgId, btn.dataset.emoji);
+  bumpQuickReaction(btn.dataset.emoji);
+});
+
+/* tapping an existing reaction badge on a bubble re-opens the picker
+   right above it, so a reaction can be changed without a fresh
+   long-press/right-click */
+$("#messages").addEventListener("click", (e)=>{
+  if(isSelectionMode()) return;
+  const badge = e.target.closest(".msg-reactions");
+  if(!badge) return;
+  const rect = badge.getBoundingClientRect();
+  openReactionBar(badge.dataset.id, rect.left + rect.width / 2, rect.top);
+});
+
+/* capture phase, and bail on longPressFired, so the synthetic click a
+   touch browser fires right after the touchend that ended a long-press
+   doesn't immediately close the reaction bar that same long-press just
+   opened — capture runs before the #messages bubble handler further
+   below gets a chance to reset that flag back to false */
+document.addEventListener("click", (e)=>{
+  if(longPressFired) return;
+  if(e.target.closest("#reactionBar") || e.target.closest("#reactionGrid") || e.target.closest(".msg-reactions")) return;
+  if(emojiPanelReactionMode && e.target.closest("#emojiPanel")) return;
+  closeReactionBar();
+}, true);
+document.addEventListener("scroll", closeReactionBar, true);
+
+/* =====================================================================
    6.4) MESSAGE CONTEXT MENU — right-click on desktop, long-press on touch
    Options: reply / copy / pin-unpin / delete
    ===================================================================== */
@@ -2671,7 +2898,7 @@ function openMsgMenu(id, x, y){
      is open */
   const bubble = document.querySelector(`.msg[data-id="${id}"]`);
   if(bubble) bubble.classList.add("selected");
-  const menuW = 190, menuH = isDeleted ? 50 : 190;
+  const { width: menuW, height: menuH } = menu.getBoundingClientRect();
   let left = x, top = y;
   if(left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
   if(top + menuH > window.innerHeight) top = window.innerHeight - menuH - 10;
@@ -2714,6 +2941,10 @@ $("#messages").addEventListener("contextmenu", (e)=>{
      long-press — don't pop a second copy of the menu on top */
   if(longPressFired) return;
   openMsgMenu(bubble.dataset.id, e.clientX, e.clientY);
+  /* the reaction bar stays fixed above the context menu itself on
+     desktop (not above the cursor), per how the person wants it */
+  const menuRect = $("#msgMenu").getBoundingClientRect();
+  openReactionBar(bubble.dataset.id, menuRect.left + menuRect.width / 2, menuRect.top);
 });
 
 /* double-click reply is a desktop/mouse convenience — gated the same
@@ -2733,6 +2964,7 @@ $("#msgMenu").addEventListener("click", async (e)=>{
   const action = btn.dataset.action;
   const m = messagesData[id];
   closeMsgMenu();
+  closeReactionBar();
   if(!m) return;
   if(action === "reply"){
     setReplyTo(id);
@@ -2828,6 +3060,10 @@ function toggleMsgSelection(id){
   else selectedMsgIds.add(id);
   updateSelectionUI();
   pushSelectionHistoryIfNeeded();
+  /* a plain tap changing the selection makes any open reaction bar
+     stale (it was for whichever message the last long-press opened it
+     on) — the long-press timer below reopens it fresh when relevant */
+  closeReactionBar();
 }
 
 function exitSelectionMode(){
@@ -2842,6 +3078,7 @@ function exitSelectionMode(){
   $(".chat-header").classList.remove("hidden");
   $("#selectionToolbar").classList.add("hidden");
   closeSelectionMoreMenu();
+  closeReactionBar();
   if(wasSelecting && selectionHistoryPushed){
     selectionHistoryPushed = false;
     if(!exitingViaPopstate) history.back();
@@ -2907,12 +3144,13 @@ function openSelectionMoreMenu(){
   menu.classList.remove("hidden");
   const btn = $("#selectionMoreBtn");
   const rect = btn.getBoundingClientRect();
-  const menuW = 190;
+  const { width: menuW, height: menuH } = menu.getBoundingClientRect();
   let left = rect.right - menuW;
   let top = rect.bottom + 6;
   if(left < 10) left = 10;
   if(left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
-  if(top + 100 > window.innerHeight) top = rect.top - 106;
+  if(top + menuH > window.innerHeight) top = rect.top - menuH - 6;
+  if(top < 10) top = 10;
   menu.style.left = Math.max(10, left) + "px";
   menu.style.top = Math.max(10, top) + "px";
 }
@@ -3027,6 +3265,10 @@ $("#messages").addEventListener("touchstart", (e)=>{
          same toolbar-based multi-select, regardless of screen width */
       enterSelectionMode(touchTargetId);
     }
+    /* the reaction bar shows above the exact spot pressed, not
+       necessarily above the whole bubble — on a tall message it stays
+       pinned over the finger's position rather than the message's top */
+    openReactionBar(touchTargetId, touchStartX, touchStartY);
   }, LONG_PRESS_MS);
 }, {passive:true});
 
@@ -3108,6 +3350,7 @@ $("#messages").addEventListener("mousedown", (e)=>{
       if(!selectedMsgIds.has(mouseDownId)) toggleMsgSelection(mouseDownId);
     }
     else enterSelectionMode(mouseDownId);
+    openReactionBar(mouseDownId, e.clientX, e.clientY);
   }, LONG_PRESS_MS);
 });
 document.addEventListener("mouseup", ()=> clearTimeout(mouseLongPressTimer));
@@ -3129,7 +3372,7 @@ function openChatListMenu(peerId, x, y){
   const item = document.querySelector(`.chat-item[data-peer-id="${peerId}"]`);
   if(item) item.classList.add("selected");
   menu.classList.remove("hidden");
-  const menuW = 190, menuH = peerId === AI_PEER_ID ? 50 : 100;
+  const { width: menuW, height: menuH } = menu.getBoundingClientRect();
   let left = x, top = y;
   if(left + menuW > window.innerWidth) left = window.innerWidth - menuW - 10;
   if(top + menuH > window.innerHeight) top = window.innerHeight - menuH - 10;
@@ -3363,11 +3606,22 @@ function appendPendingMessageBubble(tempId, text, replySnapshot){
   inner += `<span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
   bubble.innerHTML = inner;
   msgsBox.appendChild(bubble);
+  pendingBubbleNodes.set(tempId, bubble);
   msgsBox.scrollTop = msgsBox.scrollHeight;
 }
 function removePendingMessageBubble(tempId){
+  pendingBubbleNodes.delete(tempId);
   const node = $(`.msg[data-id="${tempId}"]`, $("#messages"));
   if(node) node.remove();
+}
+/* Call once the real Firestore doc for a pending send has been written
+   successfully — stops the bubble from being resurrected after the next
+   rebuild (the real message will render in its place instead). Unlike
+   removePendingMessageBubble this does NOT touch the DOM: the temp node
+   stays on screen exactly as-is until the listener's next rebuild swaps
+   it for the real bubble, so there's no flicker. */
+function resolvePendingMessageBubble(tempId){
+  pendingBubbleNodes.delete(tempId);
 }
 
 /* Same idea as appendPendingMessageBubble but for a voice note still
@@ -3387,6 +3641,7 @@ function appendPendingVoiceBubble(tempId, durationSec){
     </div>
     <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
   msgsBox.appendChild(bubble);
+  pendingBubbleNodes.set(tempId, bubble);
   msgsBox.scrollTop = msgsBox.scrollHeight;
 }
 
@@ -3632,6 +3887,7 @@ async function stopAndSendVoice(){
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("chats").doc(activeChatId).collection("messages").add(msgPayload);
+    resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants:[currentUser.id, activeChatPeer.id],
       lastMessage: "🎤 رسالة صوتية",
@@ -3862,6 +4118,11 @@ const EMOJI_KEYWORDS = {
 };
 
 let emojiPanelOpen = false;
+/* true while the panel was opened from the reaction "+" button on phone
+   instead of from the composer's own emoji button — in this mode
+   tapping an emoji applies a reaction instead of typing it, and closing
+   the panel restores the composer instead of refocusing it */
+let emojiPanelReactionMode = false;
 let activeEmojiCat = "recent";
 const RECENT_EMOJI_KEY = "wasla_recent_emojis";
 
@@ -3876,6 +4137,37 @@ function saveRecentEmoji(emoji){
   list.unshift(emoji);
   EMOJI_DATA.recent.items = list.slice(0, 32);
   try{ localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(EMOJI_DATA.recent.items)); }catch(e){}
+}
+
+/* ---- quick-react bar (the 6 always-visible icons + "+") ----
+   Picking one of these 6 directly never changes their order — the row
+   has to stay put while someone's actively tapping it. Picking a
+   reaction from the full emoji page (or the desktop extra-emoji grid)
+   instead moves that emoji to the front of this row (bumping the
+   oldest one out), so the quick bar drifts toward whatever a person
+   actually reaches for beyond the default set, over time. */
+const QUICK_REACTIONS_DEFAULT = ["👍","❤️","😂","😮","😢","🙏"];
+const QUICK_REACTIONS_KEY = "wasla_quick_reactions";
+let quickReactions = QUICK_REACTIONS_DEFAULT.slice();
+function renderQuickReactions(){
+  $("#reactionBarQuick").innerHTML = quickReactions.map(em=>
+    `<button type="button" class="reaction-bar-emoji" data-emoji="${em}">${em}</button>`
+  ).join("");
+}
+function loadQuickReactions(){
+  try{
+    const raw = localStorage.getItem(QUICK_REACTIONS_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    quickReactions = Array.isArray(saved) && saved.length ? saved : QUICK_REACTIONS_DEFAULT.slice();
+  }catch(e){ quickReactions = QUICK_REACTIONS_DEFAULT.slice(); }
+  renderQuickReactions();
+}
+function bumpQuickReaction(emoji){
+  const list = quickReactions.filter(e=> e !== emoji);
+  list.unshift(emoji);
+  quickReactions = list.slice(0, 6);
+  try{ localStorage.setItem(QUICK_REACTIONS_KEY, JSON.stringify(quickReactions)); }catch(e){}
+  renderQuickReactions();
 }
 
 /* remembers where the cursor was in the message box, so emojis still
@@ -3955,20 +4247,31 @@ function renderEmojiSearch(query){
     : `<p class="emoji-panel-empty">مفيش نتايج لـ "${query}"</p>`;
 }
 
-function openEmojiPanel(){
+function openEmojiPanel(reactionMode){
   emojiPanelOpen = true;
+  emojiPanelReactionMode = !!reactionMode;
   $("#emojiPanel").classList.add("open");
-  $("#emojiBtn").innerHTML = KEYBOARD_ICON_SVG;
+  $("#emojiPanel").classList.toggle("reaction-mode", emojiPanelReactionMode);
+  if(emojiPanelReactionMode){
+    /* full-page-style picker standing in for the reaction grid: hide the
+       composer entirely (not just lift it) so it reads like the phone's
+       own emoji keyboard, the way it does in the reference screenshot */
+    $("#composer").classList.add("reaction-emoji-active");
+  } else {
+    $("#emojiBtn").innerHTML = KEYBOARD_ICON_SVG;
+  }
   $("#emojiSearchInput").value = "";
   renderEmojiTabs();
   renderEmojiCategory(EMOJI_DATA.recent.items.length ? "recent" : "smileys");
-  applyMobileComposerLift();
+  if(!emojiPanelReactionMode) applyMobileComposerLift();
 }
 function closeEmojiPanel(){
   emojiPanelOpen = false;
-  $("#emojiPanel").classList.remove("open");
-  $("#emojiBtn").innerHTML = EMOJI_ICON_SVG;
+  $("#emojiPanel").classList.remove("open", "reaction-mode");
+  if(!emojiPanelReactionMode) $("#emojiBtn").innerHTML = EMOJI_ICON_SVG;
+  $("#composer").classList.remove("reaction-emoji-active");
   clearMobileComposerLift();
+  emojiPanelReactionMode = false;
 }
 
 /* on phone (single-pane view) the emoji panel is a fixed bottom sheet
@@ -3987,10 +4290,11 @@ function clearMobileComposerLift(){
   $("#composer").style.marginBottom = "";
 }
 window.addEventListener("resize", ()=>{
-  if(emojiPanelOpen) applyMobileComposerLift();
+  if(emojiPanelOpen && !emojiPanelReactionMode) applyMobileComposerLift();
 });
 
 loadRecentEmojis();
+loadQuickReactions();
 
 $("#emojiBtn").addEventListener("click", ()=>{
   if(emojiPanelOpen){
@@ -4008,8 +4312,10 @@ $("#messageInput").addEventListener("focus", ()=>{
 });
 
 $("#emojiPanelHandle").addEventListener("click", ()=>{
+  const wasReactionMode = emojiPanelReactionMode;
   closeEmojiPanel();
-  $("#messageInput").focus();
+  if(wasReactionMode) closeReactionBar();
+  else $("#messageInput").focus();
 });
 
 $("#emojiPanelTabs").addEventListener("click", (e)=>{
@@ -4022,6 +4328,12 @@ $("#emojiPanelTabs").addEventListener("click", (e)=>{
 $("#emojiPanelBody").addEventListener("click", (e)=>{
   const btn = e.target.closest("button[data-emoji]");
   if(!btn) return;
+  if(emojiPanelReactionMode){
+    if(reactionBarMsgId) applyReaction(reactionBarMsgId, btn.dataset.emoji);
+    saveRecentEmoji(btn.dataset.emoji);
+    bumpQuickReaction(btn.dataset.emoji);
+    return;
+  }
   insertEmojiIntoComposer(btn.dataset.emoji);
 });
 
@@ -4034,7 +4346,9 @@ $("#emojiSearchInput").addEventListener("input", (e)=>{
 document.addEventListener("click", (e)=>{
   if(!emojiPanelOpen) return;
   if(e.target.closest("#emojiPanel") || e.target.closest("#emojiBtn")) return;
+  const wasReactionMode = emojiPanelReactionMode;
   closeEmojiPanel();
+  if(wasReactionMode) closeReactionBar();
 }, true);
 
 
@@ -4092,6 +4406,7 @@ $("#composer").addEventListener("submit", async (e)=>{
       msgPayload.replyTo = { id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text };
     }
     await db.collection("chats").doc(activeChatId).collection("messages").add(msgPayload);
+    resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants:[currentUser.id, activeChatPeer.id],
       lastMessage: text,
