@@ -3484,6 +3484,13 @@ $("#selectionMoreMenu").addEventListener("click", async (e)=>{
      panel) exits selection mode entirely
    On desktop, Ctrl/Cmd+click also works to START selection mode (or
    add to it) without needing the right-click menu's "select" option */
+/* rapid repeated taps on the very same bubble (finger bouncing / phone
+   registering the touch twice) used to toggle the selection on then off
+   again almost instantly — ignore a second tap on the same message if it
+   lands within this window of the first one */
+let lastSelectionTapId = null, lastSelectionTapTime = 0;
+const SELECTION_TAP_DEBOUNCE_MS = 350;
+
 $("#messages").addEventListener("click", (e)=>{
   if(e.target.closest(".ai-feedback-btn")) return;
   if(longPressFired){
@@ -3510,6 +3517,17 @@ $("#messages").addEventListener("click", (e)=>{
     }
     e.preventDefault();
     e.stopPropagation();
+    /* swallow a second tap that lands on the same bubble right after the
+       first one — this is the fast double-tap/bounce the person is
+       reporting on phone/tablet. Desktop mouse clicks are untouched. */
+    if(!isMouseDevice()){
+      const nowTap = Date.now();
+      if(bubble.dataset.id === lastSelectionTapId && (nowTap - lastSelectionTapTime) < SELECTION_TAP_DEBOUNCE_MS){
+        return;
+      }
+      lastSelectionTapId = bubble.dataset.id;
+      lastSelectionTapTime = nowTap;
+    }
     /* deleted placeholders can be selected too (delete-for-me still
        applies to them) — so no "deleted" exclusion here anymore.
        On phone, tapping the ONLY selected bubble exits selection mode
@@ -3558,7 +3576,11 @@ $("#messages").addEventListener("touchstart", (e)=>{
     longPressFired = true;
     if(navigator.vibrate) navigator.vibrate(15);
     if(isSelectionMode()){
-      if(!selectedMsgIds.has(touchTargetId)) toggleMsgSelection(touchTargetId);
+      const nowTap = Date.now();
+      const isRapidRepeat = touchTargetId === lastSelectionTapId && (nowTap - lastSelectionTapTime) < SELECTION_TAP_DEBOUNCE_MS;
+      lastSelectionTapId = touchTargetId;
+      lastSelectionTapTime = nowTap;
+      if(!selectedMsgIds.has(touchTargetId) && !isRapidRepeat) toggleMsgSelection(touchTargetId);
     } else {
       /* any real touch device — phone or iPad — long-press starts the
          same toolbar-based multi-select, regardless of screen width */
