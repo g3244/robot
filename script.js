@@ -3512,9 +3512,22 @@ $("#messages").addEventListener("click", (e)=>{
     e.stopPropagation();
     /* deleted placeholders can be selected too (delete-for-me still
        applies to them) — so no "deleted" exclusion here anymore.
-       Tapping/clicking any selected bubble again deselects it, on
-       both desktop and phone — only the long-press gesture (below)
-       is add-only, since that's what starts/grows a selection. */
+       On phone, tapping the ONLY selected bubble exits selection mode
+       entirely — same as tapping empty space. But if more than one
+       message is selected, tapping a selected bubble just untoggles
+       that one and keeps the rest selected (mode stays active) —
+       exiting the whole selection over one message would wipe out a
+       multi-select the person is still building.
+       On desktop, tapping a selected bubble always just untoggles it
+       (checkbox-style), since ctrl/cmd+click multi-select there is a
+       deliberate action and the toolbar's cancel button is the
+       intended way out. Tapping an unselected bubble always just adds
+       it, on both platforms — only the long-press gesture is add-only
+       for *starting/growing* a selection; taps can also remove. */
+    if(!isMouseDevice() && selectedMsgIds.size === 1 && selectedMsgIds.has(bubble.dataset.id)){
+      exitSelectionMode();
+      return;
+    }
     toggleMsgSelection(bubble.dataset.id);
     return;
   }
