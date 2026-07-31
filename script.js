@@ -2416,6 +2416,13 @@ async function openChat(peer){
      bubble, once that hold ends — see the guard in onSnapshot below for
      why this is needed at all. */
   flushPendingMsgsRender = () => {
+    /* the finger lifting (or the mouse-held-down fallback releasing)
+       isn't the real end of the reaction interaction if the picker is
+       still sitting open waiting for an emoji — keep holding the
+       backlog in that case. closeReactionBar() calls this same function
+       again once the picker actually closes, so nothing gets lost,
+       it just waits for the right moment. */
+    if(reactionBarMsgId !== null) return;
     if(pendingMsgsSnapshot){
       const snap = pendingMsgsSnapshot;
       pendingMsgsSnapshot = null;
@@ -2433,12 +2440,23 @@ async function openChat(peer){
          down on one of those bubbles yanks that DOM node out from under
          the touch, which the browser reports as touchcancel — silently
          killing the long-press timer before it ever reaches the
-         reaction bar. Deferring the rebuild until the finger lifts fixes
-         that without giving up the "always rebuild from the live data"
-         simplicity elsewhere. The AI chat never hits this because its
-         own messages are written already-"read", so it rarely gets a
-         second snapshot mid-hold. */
-      if(touchHoldActive){ pendingMsgsSnapshot = snap; return; }
+         reaction bar. The AI chat never hits this because its own
+         messages are written already-"read", so it rarely gets a second
+         snapshot mid-hold.
+         Deferring only until the finger lifts isn't quite enough though:
+         the finger lifts the instant the reaction bar opens, but the
+         person is still picking an emoji for another second or two —
+         a rebuild landing in that window is harmless to the bar itself
+         (it lives outside #messages) but was still a fragile place to
+         leave a race. So the reaction picker is now treated as its own
+         self-contained interaction: any rebuild that shows up while
+         either a finger is down OR the reaction bar/grid is still open
+         gets held back, and closeReactionBar() (called the moment a
+         pick is made, or the picker is dismissed) is what lets the
+         backlog through — reacting no longer depends on the read-receipt
+         machinery's timing at all. */
+      const reactionUiOpen = reactionBarMsgId !== null;
+      if(touchHoldActive || reactionUiOpen){ pendingMsgsSnapshot = snap; return; }
       renderMsgsSnapshot(snap);
     }, err=> console.error("messages error", err));
 }
@@ -3098,6 +3116,15 @@ function closeReactionBar(){
   closeReactionGrid();
   reactionBarMsgId = null;
   if(emojiPanelReactionMode) closeEmojiPanel();
+  /* the whole point of deferring the messages rebuild (see
+     touchHoldActive/pendingMsgsSnapshot) is that reacting shouldn't get
+     interrupted by an unrelated read-receipt/typing update landing at
+     the same time. But once the picker is actually closed, there's no
+     reason to keep sitting on a stale snapshot until some other event
+     happens to trigger the next render — apply it right now, so the
+     rest of the chat (including the badge that was just set) catches
+     up immediately instead of waiting on luck. */
+  if(!touchHoldActive && flushPendingMsgsRender) flushPendingMsgsRender();
 }
 
 async function setReaction(msgId, emoji){
@@ -3710,6 +3737,10 @@ $("#messages").addEventListener("mousedown", (e)=>{
   if(!bubble) return;
   mouseDownId = bubble.dataset.id;
   longPressFired = false;
+  /* same reasoning as the real touchstart handler above: hold this from
+     the first mousedown so a snapshot rebuild landing mid-hold can't
+     yank the bubble out from under the "press" and kill it early. */
+  touchHoldActive = true;
   clearTimeout(mouseLongPressTimer);
   mouseLongPressTimer = setTimeout(()=>{
     longPressFired = true;
@@ -3720,8 +3751,16 @@ $("#messages").addEventListener("mousedown", (e)=>{
     openReactionBar(mouseDownId, e.clientX, e.clientY);
   }, LONG_PRESS_MS);
 });
-document.addEventListener("mouseup", ()=> clearTimeout(mouseLongPressTimer));
-$("#messages").addEventListener("mouseleave", ()=> clearTimeout(mouseLongPressTimer), true);
+document.addEventListener("mouseup", ()=>{
+  clearTimeout(mouseLongPressTimer);
+  touchHoldActive = false;
+  if(flushPendingMsgsRender) flushPendingMsgsRender();
+});
+$("#messages").addEventListener("mouseleave", ()=>{
+  clearTimeout(mouseLongPressTimer);
+  touchHoldActive = false;
+  if(flushPendingMsgsRender) flushPendingMsgsRender();
+}, true);
 
 /* =====================================================================
    6.4c) CHAT-LIST SELECTION — right-click on desktop targets a single
