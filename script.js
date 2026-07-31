@@ -101,6 +101,27 @@ const WALLPAPERS = [
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
+/* #messages gets its scrollTop reassigned by our OWN code very often —
+   any unrelated Firestore change (a read-receipt tick, the other person
+   typing, a reaction, etc.) rebuilds the list and re-sets scrollTop to
+   stay pinned near the bottom. That assignment fires a native "scroll"
+   event exactly like a real finger-drag would, which was being picked
+   up by the reaction bar / context menus' "close on scroll" listeners —
+   so long-pressing a message to react could open the picker and have it
+   instantly close itself a moment later just because the peer happened
+   to be typing, or a read receipt landed, at that exact moment (nothing
+   to do with the person's own touch/scroll at all).
+   setMsgsScrollTop() marks a short window right after any such
+   programmatic scroll so those "close on scroll" listeners can tell the
+   difference and ignore it, while still closing normally on a real
+   scroll gesture from the person. */
+let msgsScrollGuardUntil = 0;
+function isProgrammaticScroll(){ return Date.now() < msgsScrollGuardUntil; }
+function setMsgsScrollTop(el, top){
+  msgsScrollGuardUntil = Date.now() + 400;
+  el.scrollTop = top;
+}
+
 function toast(msg, isError=false){
   const t = $("#toast");
   t.textContent = msg;
@@ -852,8 +873,9 @@ async function logout(){
   resetUIAfterAuthEnd();
   toast("تم تسجيل الخروج");
 }
-$("#logoutBtn").addEventListener("click", ()=>{
-  if(confirm("متأكد إنك عايز تسجل خروج؟")) logout();
+$("#logoutBtn").addEventListener("click", async ()=>{
+  const ok = await askConfirm("تسجيل الخروج", "هل تريد تسجيل الخروج؟");
+  if(ok) logout();
 });
 
 /* =====================================================================
@@ -874,6 +896,59 @@ $("#cancelDeleteAccountBtn").addEventListener("click", ()=>{
 });
 $("#deleteAccountOverlay").addEventListener("click", (e)=>{
   if(e.target.id === "deleteAccountOverlay") $("#cancelDeleteAccountBtn").click();
+});
+
+/* =====================================================================
+   2.1b) CHANGE PASSWORD (asks for the old password to re-verify, then
+   sets the new one via Firebase Auth's updatePassword)
+   ===================================================================== */
+$("#changePasswordBtn").addEventListener("click", ()=>{
+  $("#changePasswordOldInput").value = "";
+  $("#changePasswordNewInput").value = "";
+  $("#changePasswordMsg").textContent = "";
+  $("#changePasswordOverlay").classList.remove("hidden");
+  $("#changePasswordOldInput").focus();
+});
+$("#cancelChangePasswordBtn").addEventListener("click", ()=>{
+  $("#changePasswordOverlay").classList.add("hidden");
+  $("#changePasswordOldInput").value = "";
+  $("#changePasswordNewInput").value = "";
+  $("#changePasswordMsg").textContent = "";
+});
+$("#changePasswordOverlay").addEventListener("click", (e)=>{
+  if(e.target.id === "changePasswordOverlay") $("#cancelChangePasswordBtn").click();
+});
+
+$("#confirmChangePasswordBtn").addEventListener("click", async ()=>{
+  const oldPassword = $("#changePasswordOldInput").value;
+  const newPassword = $("#changePasswordNewInput").value;
+  const msgEl = $("#changePasswordMsg");
+  msgEl.textContent = "";
+  if(!oldPassword){ msgEl.textContent = "اكتب كلمة السر القديمة."; return; }
+  if(!newPassword || newPassword.length < 6){ msgEl.textContent = "كلمة السر الجديدة لازم تكون 6 أحرف على الأقل."; return; }
+  if(!currentUser || !auth.currentUser){ msgEl.textContent = "حصل خطأ، جرّب تسجل دخول تاني."; return; }
+
+  const btn = $("#confirmChangePasswordBtn");
+  btn.disabled = true; btn.textContent = "جاري التغيير...";
+  try{
+    /* re-verify the old password first, exactly like the delete-account
+       flow, before Firebase will allow the password to be changed */
+    const cred = firebase.auth.EmailAuthProvider.credential(syntheticEmailForId(currentUser.id), oldPassword);
+    await auth.currentUser.reauthenticateWithCredential(cred);
+    await auth.currentUser.updatePassword(newPassword);
+
+    $("#changePasswordOverlay").classList.add("hidden");
+    $("#changePasswordOldInput").value = "";
+    $("#changePasswordNewInput").value = "";
+    toast("اتغيرت كلمة السر");
+  }catch(err){
+    console.error(err);
+    if(err && (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential")) msgEl.textContent = "كلمة السر القديمة غلط.";
+    else if(err && err.code === "auth/weak-password") msgEl.textContent = "كلمة السر الجديدة ضعيفة، اختار كلمة سر أقوى.";
+    else msgEl.textContent = friendlyErrorMessage(err);
+  }finally{
+    btn.disabled = false; btn.textContent = "تغيير";
+  }
 });
 
 $("#confirmDeleteAccountBtn").addEventListener("click", async ()=>{
@@ -1385,6 +1460,59 @@ $("#confirmSaveFriendBtn").addEventListener("click", async ()=>{
     closeSaveFriendModal();
   }catch(err){ console.error(err); toast("حصل خطأ", true); }
 });
+/* ---- "New contact" modal: add someone straight by their ID, without
+   needing to already have a chat/profile open for them ---- */
+function openAddContactModal(){
+  $("#addContactFirstNameInput").value = "";
+  $("#addContactLastNameInput").value = "";
+  $("#addContactIdInput").value = "";
+  $("#addContactMsg").textContent = "";
+  $("#addContactOverlay").classList.remove("hidden");
+  $("#addContactFirstNameInput").focus();
+}
+function closeAddContactModal(){
+  $("#addContactOverlay").classList.add("hidden");
+}
+$("#openAddContactBtn").addEventListener("click", openAddContactModal);
+$("#cancelAddContactBtn").addEventListener("click", closeAddContactModal);
+$("#addContactOverlay").addEventListener("click", e=>{
+  if(e.target.id === "addContactOverlay") closeAddContactModal();
+});
+$("#addContactIdInput").addEventListener("input", e=>{ e.target.value = e.target.value.replace(/\D/g,""); });
+$("#confirmAddContactBtn").addEventListener("click", async ()=>{
+  const msg = $("#addContactMsg");
+  const firstName = $("#addContactFirstNameInput").value.trim();
+  const lastName = $("#addContactLastNameInput").value.trim();
+  const id = $("#addContactIdInput").value.trim();
+  if(!firstName){ msg.textContent = "لازم تكتب الاسم الأول"; return; }
+  if(id.length !== 11){ msg.textContent = "رقم التعريف لازم يكون 11 رقم"; return; }
+  if(id === currentUser.id){ msg.textContent = "ده رقمك أنت 🙂"; return; }
+  msg.textContent = "جاري البحث...";
+  try{
+    const snap = await db.collection("users").where("id","==",id).limit(1).get();
+    if(snap.empty){
+      msg.textContent = "مفيش مستخدم برقم التعريف ده";
+      return;
+    }
+    const peer = snap.docs[0].data();
+    peer.uid = snap.docs[0].id;
+    peer.id = id;
+    peerCache[id] = peer;
+
+    const current = Array.isArray(currentUser.savedContacts) ? currentUser.savedContacts.filter(c=> c.id!==id) : [];
+    const next = [...current, { id, alias: firstName, familyName: lastName }];
+    await persistSavedContacts(next);
+
+    toast("اتحفظ في الأصدقاء");
+    closeAddContactModal();
+    closeFriendsPage();
+    openChat(peer);
+  }catch(err){
+    console.error(err);
+    msg.textContent = "حصل خطأ في البحث";
+  }
+});
+
 /* Pushes the freshly-saved custom name into every place that peer is
    currently shown, without waiting for a Firestore round-trip. */
 function refreshSavedNameEverywhere(id){
@@ -1677,6 +1805,137 @@ const TICK_DOUBLE = `<svg viewBox="0 0 20 12" fill="none" stroke="currentColor" 
 const NO_ENTRY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
 const VOICE_PLAY_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>`;
 const VOICE_PAUSE_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
+const FILE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
+const IMG_CLOSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+/* human-readable file size, e.g. 1536 -> "1.5 KB" */
+function fmtFileSize(bytes){
+  if(!bytes) return "0 KB";
+  const units = ["B","KB","MB","GB"];
+  let i = 0, n = bytes;
+  while(n >= 1024 && i < units.length - 1){ n /= 1024; i++; }
+  return (i === 0 ? Math.round(n) : n.toFixed(1)) + " " + units[i];
+}
+
+/* =====================================================================
+   Chat image bubbles — WhatsApp-style: a received image starts as a
+   blurred placeholder with a "⬇ size" pill; tapping it streams the real
+   file with a circular progress ring (X in the middle doubles as
+   cancel) and swaps in the real picture once it lands. A sent image
+   shows the same ring while it's still uploading to Storage. Downloaded
+   bytes are cached in-memory per message so re-opening/rebuilding the
+   chat (which fully re-renders #messages on every Firestore snapshot)
+   doesn't re-download something already fetched once.
+   ===================================================================== */
+const RING_R = 20;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
+const imageBlobCache = new Map();     // msg doc id -> blob: URL (or the original URL as a no-progress fallback)
+const imageDownloadState = new Map(); // msg doc id -> { progress, controller }
+
+function imageBubbleHTML(m, docId){
+  const cachedUrl = imageBlobCache.get(docId);
+  const state = cachedUrl ? "done" : "downloading";
+  const inFlight = imageDownloadState.get(docId);
+  const progress = inFlight ? inFlight.progress : 0;
+  const offset = (RING_CIRCUMFERENCE * (1 - Math.min(100, progress) / 100)).toFixed(2);
+  return `<div class="msg-image" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(m.imageUrl||"")}">
+    <div class="msg-image-ph"></div>
+    <img class="msg-image-img${state === "done" ? "" : " hidden"}" src="${state === "done" ? escapeHtml(cachedUrl) : ""}" alt="صورة">
+    <div class="msg-image-overlay">
+      <div class="msg-image-progress${state === "downloading" ? "" : " hidden"}">
+        <svg class="msg-image-ring" viewBox="0 0 48 48">
+          <circle class="ring-track" cx="24" cy="24" r="${RING_R}"></circle>
+          <circle class="ring-bar" cx="24" cy="24" r="${RING_R}" style="stroke-dasharray:${RING_CIRCUMFERENCE.toFixed(2)}; stroke-dashoffset:${offset}"></circle>
+        </svg>
+        <button type="button" class="msg-image-cancel" title="إلغاء">${IMG_CLOSE_ICON}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function updateImageRingDOM(docId, pct){
+  const wrap = $(`.msg-image[data-msgid="${cssEscapeId(docId)}"]`);
+  if(!wrap) return;
+  const bar = wrap.querySelector(".ring-bar");
+  if(bar) bar.style.strokeDashoffset = (RING_CIRCUMFERENCE * (1 - Math.min(100, pct) / 100)).toFixed(2);
+}
+function updateImageBubbleDOM(docId, state, srcUrl){
+  const wrap = $(`.msg-image[data-msgid="${cssEscapeId(docId)}"]`);
+  if(!wrap) return;
+  wrap.dataset.state = state;
+  const progWrap = wrap.querySelector(".msg-image-progress");
+  const img = wrap.querySelector(".msg-image-img");
+  if(state === "downloading" || state === "paused"){
+    if(progWrap){ progWrap.classList.remove("hidden"); progWrap.classList.remove("show-cancel"); }
+  } else if(state === "done"){
+    if(progWrap) progWrap.classList.add("hidden");
+    if(img && srcUrl){ img.src = srcUrl; img.classList.remove("hidden"); }
+  }
+}
+/* Any image bubble that just landed in the DOM as "downloading" but
+   hasn't actually been kicked off yet (fresh render, nobody's fetched
+   it) starts pulling automatically — no tap required. Safe to call on
+   every rebuild: startImageDownload no-ops if it's already in flight or
+   already cached. */
+function autoStartPendingImageDownloads(){
+  $("#messages").querySelectorAll('.msg-image[data-state="downloading"]').forEach(el=>{
+    startImageDownload(el.dataset.msgid, el.dataset.url);
+  });
+}
+/* CSS.escape isn't available in every target browser here, and doc ids
+   are plain alphanumeric Firestore ids anyway, but this keeps the
+   attribute-selector lookups above safe regardless. */
+function cssEscapeId(id){
+  return String(id).replace(/["\\]/g, "\\$&");
+}
+
+async function startImageDownload(docId, url){
+  if(!url || imageBlobCache.has(docId) || imageDownloadState.has(docId)) return;
+  const controller = new AbortController();
+  imageDownloadState.set(docId, { progress:0, controller });
+  updateImageBubbleDOM(docId, "downloading");
+  try{
+    const res = await fetch(url, { signal: controller.signal });
+    if(!res.ok || !res.body) throw new Error("fetch failed");
+    const total = +res.headers.get("content-length") || 0;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while(true){
+      const { done, value } = await reader.read();
+      if(done) break;
+      chunks.push(value);
+      received += value.length;
+      const pct = total ? (received / total * 100) : Math.min(92, received / 1024 / 20);
+      const st = imageDownloadState.get(docId);
+      if(st){ st.progress = pct; updateImageRingDOM(docId, pct); }
+    }
+    const blobUrl = URL.createObjectURL(new Blob(chunks));
+    imageBlobCache.set(docId, blobUrl);
+    imageDownloadState.delete(docId);
+    updateImageBubbleDOM(docId, "done", blobUrl);
+  }catch(err){
+    imageDownloadState.delete(docId);
+    if(err && err.name === "AbortError"){
+      /* cancelled by the person — freeze the ring where it was and wait
+         for them to tap it again (handled in the click delegation) or
+         for the next unrelated rebuild to auto-retry it from scratch. */
+      updateImageBubbleDOM(docId, "paused");
+      return;
+    }
+    /* fetch() can fail on cross-origin progress tracking even when a
+       plain <img src> would work fine (e.g. Storage CORS not set up
+       for GET+stream) — fall back to just loading it directly rather
+       than leaving the person stuck on a dead download button. */
+    console.error(err);
+    imageBlobCache.set(docId, url);
+    updateImageBubbleDOM(docId, "done", url);
+  }
+}
+function cancelImageDownload(docId){
+  const st = imageDownloadState.get(docId);
+  if(st) st.controller.abort();
+}
 /* mm:ss for voice-note timers/durations — used both while recording (live
    elapsed time) and when rendering a sent voice message's fixed length */
 function fmtDuration(totalSeconds){
@@ -2039,6 +2298,16 @@ async function openChat(peer){
               <div class="voice-track"><div class="voice-track-fill"></div></div>
               <span class="voice-time">${fmtDuration(m.duration||0)}</span>
             </div>`;
+          } else if(m.type === "image"){
+            inner += imageBubbleHTML(m, doc.id);
+          } else if(m.type === "file"){
+            inner += `<div class="msg-file" data-url="${escapeHtml(m.fileUrl||"")}">
+              <span class="msg-file-icon">${FILE_ICON}</span>
+              <div class="msg-file-info">
+                <span class="msg-file-name">${escapeHtml(m.fileName||"ملف")}</span>
+                <span class="msg-file-size">${fmtFileSize(m.fileSize||0)}</span>
+              </div>
+            </div>`;
           } else {
             inner += `<span class="msg-text">${escapeHtml(m.text)}</span>`;
           }
@@ -2086,8 +2355,25 @@ async function openChat(peer){
          wiped by any unrelated update to this chat (a read receipt, a
          reaction, the other person's message) before it ever gets the
          chance to be replaced by its real bubble, making it look like
-         the message vanished into thin air. */
-      pendingBubbleNodes.forEach(node=> msgsBox.appendChild(node));
+         the message vanished into thin air.
+         BUT: Firestore's local snapshot fires the instant a write hits
+         the local cache — well before the add()/set() promise the send
+         functions are awaiting actually resolves — so this snapshot can
+         already contain the real message (rendered above, under its
+         real id) while resolvePendingMessageBubble() for that same send
+         hasn't run yet. Sending now pre-generates the real doc id and
+         reuses it as tempId (see sendMessage/sendImageFile/etc.), so
+         once that id shows up in messagesData it means the real bubble
+         is already on screen — skip re-adding the pending one, or the
+         message would flash as two bubbles and then collapse to one a
+         moment later when the pending copy finally got cleaned up. */
+      pendingBubbleNodes.forEach((node, id)=>{
+        if(!messagesData[id]) msgsBox.appendChild(node);
+      });
+      /* images render in a "downloading" state by default now (no more
+         tap-to-download pill) — kick off the actual fetch for any that
+         aren't already in flight or cached. */
+      autoStartPendingImageDownloads();
       /* the rebuild above just wiped #messages including the typing
          bubble (if it was there) — put it straight back, no animation
          needed since it was already visible a moment ago */
@@ -2099,11 +2385,11 @@ async function openChat(peer){
         msgsBox.appendChild(node);
       }
       if(wasNearBottom){
-        msgsBox.scrollTop = msgsBox.scrollHeight;
+        setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
       }else{
         /* keep the person at roughly the same spot they were reading,
            instead of resetting to the top just because we rebuilt everything */
-        msgsBox.scrollTop = msgsBox.scrollHeight - msgsBox.clientHeight - distanceFromBottomBefore;
+        setMsgsScrollTop(msgsBox, msgsBox.scrollHeight - msgsBox.clientHeight - distanceFromBottomBefore);
       }
       updateScrollToBottomBtn();
       if(isSelectionMode()) updateSelectionUI();
@@ -2445,7 +2731,7 @@ function closePinnedMenu(){ $("#pinnedMenu").classList.add("hidden"); }
 document.addEventListener("click", (e)=>{
   if(!e.target.closest("#pinnedMenu")) closePinnedMenu();
 });
-document.addEventListener("scroll", closePinnedMenu, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closePinnedMenu(); }, true);
 
 $("#pinnedBanner").addEventListener("contextmenu", (e)=>{
   if(!currentPinnedId) return;
@@ -2873,7 +3159,7 @@ document.addEventListener("click", (e)=>{
   if(emojiPanelReactionMode && e.target.closest("#emojiPanel")) return;
   closeReactionBar();
 }, true);
-document.addEventListener("scroll", closeReactionBar, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closeReactionBar(); }, true);
 
 /* =====================================================================
    6.4) MESSAGE CONTEXT MENU — right-click on desktop, long-press on touch
@@ -2916,7 +3202,7 @@ function closeMsgMenu(){
 document.addEventListener("click", (e)=>{
   if(!e.target.closest("#msgMenu")) closeMsgMenu();
 });
-document.addEventListener("scroll", closeMsgMenu, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closeMsgMenu(); }, true);
 
 $("#messages").addEventListener("contextmenu", (e)=>{
   const bubble = e.target.closest(".msg");
@@ -3160,7 +3446,7 @@ function closeSelectionMoreMenu(){
 document.addEventListener("click", (e)=>{
   if(!e.target.closest("#selectionMoreMenu") && !e.target.closest("#selectionMoreBtn")) closeSelectionMoreMenu();
 });
-document.addEventListener("scroll", closeSelectionMoreMenu, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closeSelectionMoreMenu(); }, true);
 
 $("#selectionMoreBtn").addEventListener("click", (e)=>{
   e.stopPropagation();
@@ -3390,7 +3676,7 @@ function closeChatListMenu(){
 document.addEventListener("click", (e)=>{
   if(!e.target.closest("#chatListMenu")) closeChatListMenu();
 });
-document.addEventListener("scroll", closeChatListMenu, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closeChatListMenu(); }, true);
 
 $("#chatList").addEventListener("contextmenu", (e)=>{
   const item = e.target.closest(".chat-item");
@@ -3414,6 +3700,8 @@ $("#chatListMenu").addEventListener("click", async (e)=>{
     if(ok) toast("اتمسح الشات");
   } else if(action === "block"){
     if(peerId === AI_PEER_ID) return;
+    const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
+    if(!ok) return;
     await blockId(peerId);
     toast("تم حظر المستخدم");
   }
@@ -3453,6 +3741,8 @@ $("#chatListSelectionCancelBtn").addEventListener("click", exitChatListSelection
 $("#chatListSelectionBlockBtn").addEventListener("click", async ()=>{
   const ids = [...chatListSelectedIds];
   if(ids.length !== 1 || ids[0] === AI_PEER_ID) return;
+  const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
+  if(!ok) return;
   await blockId(ids[0]);
   toast("تم حظر المستخدم");
   exitChatListSelection();
@@ -3607,7 +3897,7 @@ function appendPendingMessageBubble(tempId, text, replySnapshot){
   bubble.innerHTML = inner;
   msgsBox.appendChild(bubble);
   pendingBubbleNodes.set(tempId, bubble);
-  msgsBox.scrollTop = msgsBox.scrollHeight;
+  setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
 }
 function removePendingMessageBubble(tempId){
   pendingBubbleNodes.delete(tempId);
@@ -3642,7 +3932,83 @@ function appendPendingVoiceBubble(tempId, durationSec){
     <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
   msgsBox.appendChild(bubble);
   pendingBubbleNodes.set(tempId, bubble);
-  msgsBox.scrollTop = msgsBox.scrollHeight;
+  setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
+}
+
+/* Same idea as appendPendingMessageBubble/appendPendingVoiceBubble but for
+   an image still uploading — shows the local (blob:) preview blurred
+   right away with a circular upload-progress ring on top (× in the
+   middle doubles as "cancel upload"). sendImageFile() drives the ring
+   via updateUploadRingDOM/markImageUploadDone as the Storage upload
+   reports progress, then this bubble stays on screen exactly as-is
+   (unblurred, ring gone) until the messages listener swaps it for the
+   real, synced bubble. */
+const imageUploadTasks = new Map(); // tempId -> firebase Storage UploadTask, so the × can cancel it
+function appendPendingImageBubble(tempId, localUrl){
+  const msgsBox = $("#messages");
+  const bubble = document.createElement("div");
+  bubble.className = "msg out pending";
+  bubble.dataset.id = tempId;
+  bubble.innerHTML = `
+    <div class="msg-image" data-state="uploading" data-tempid="${tempId}">
+      <img class="msg-image-img msg-image-blurred" src="${localUrl}" alt="صورة">
+      <div class="msg-image-overlay">
+        <div class="msg-image-progress">
+          <svg class="msg-image-ring" viewBox="0 0 48 48">
+            <circle class="ring-track" cx="24" cy="24" r="${RING_R}"></circle>
+            <circle class="ring-bar" cx="24" cy="24" r="${RING_R}" style="stroke-dasharray:${RING_CIRCUMFERENCE.toFixed(2)}; stroke-dashoffset:${RING_CIRCUMFERENCE.toFixed(2)}"></circle>
+          </svg>
+          <button type="button" class="msg-image-cancel" title="إلغاء">${IMG_CLOSE_ICON}</button>
+        </div>
+      </div>
+    </div>
+    <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
+  msgsBox.appendChild(bubble);
+  pendingBubbleNodes.set(tempId, bubble);
+  setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
+}
+function updateUploadRingDOM(tempId, pct){
+  const wrap = $(`.msg-image[data-tempid="${cssEscapeId(tempId)}"]`);
+  if(!wrap) return;
+  const bar = wrap.querySelector(".ring-bar");
+  if(bar) bar.style.strokeDashoffset = (RING_CIRCUMFERENCE * (1 - Math.min(100, pct) / 100)).toFixed(2);
+}
+function markImageUploadDone(tempId, remoteUrl){
+  const wrap = $(`.msg-image[data-tempid="${cssEscapeId(tempId)}"]`);
+  if(!wrap) return;
+  wrap.dataset.state = "done";
+  const overlay = wrap.querySelector(".msg-image-overlay");
+  if(overlay) overlay.style.opacity = "0";
+  const img = wrap.querySelector(".msg-image-img");
+  if(img){
+    img.classList.remove("msg-image-blurred");
+    if(remoteUrl) img.src = remoteUrl;
+  }
+}
+function cancelImageUpload(tempId){
+  const task = imageUploadTasks.get(tempId);
+  if(task){ try{ task.cancel(); }catch(e){} }
+}
+
+/* Same idea, for a generic file upload — shows the name/size right away
+   with a subtle "uploading" dim. */
+function appendPendingFileBubble(tempId, fileName, fileSize){
+  const msgsBox = $("#messages");
+  const bubble = document.createElement("div");
+  bubble.className = "msg out pending";
+  bubble.dataset.id = tempId;
+  bubble.innerHTML = `
+    <div class="msg-file" data-uploading="1">
+      <span class="msg-file-icon">${FILE_ICON}</span>
+      <div class="msg-file-info">
+        <span class="msg-file-name">${escapeHtml(fileName)}</span>
+        <span class="msg-file-size">${fmtFileSize(fileSize)}</span>
+      </div>
+    </div>
+    <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
+  msgsBox.appendChild(bubble);
+  pendingBubbleNodes.set(tempId, bubble);
+  setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
 }
 
 /* =====================================================================
@@ -3697,6 +4063,39 @@ $("#messages").addEventListener("click", (e)=>{
   const btn = e.target.closest(".voice-play-btn");
   if(!btn || btn.disabled) return;
   toggleVoicePlayback(btn);
+});
+/* Images now download/upload automatically the moment they appear — no
+   tap needed to start. Tapping the progress ring while it's running just
+   reveals the × (tap again / tap × itself to actually cancel); tapping
+   it while paused resumes. Tapping a fully-loaded image opens it full
+   size. Files keep their simpler "tap to open/download" behavior. */
+$("#messages").addEventListener("click", (e)=>{
+  const cancelBtn = e.target.closest(".msg-image-cancel");
+  if(cancelBtn){
+    const wrap = cancelBtn.closest(".msg-image");
+    if(!wrap) return;
+    if(wrap.dataset.state === "uploading" && wrap.dataset.tempid) cancelImageUpload(wrap.dataset.tempid);
+    else if(wrap.dataset.msgid) cancelImageDownload(wrap.dataset.msgid);
+    return;
+  }
+  const progArea = e.target.closest(".msg-image-progress");
+  if(progArea){
+    const wrap = progArea.closest(".msg-image");
+    if(!wrap) return;
+    if(wrap.dataset.state === "paused" && wrap.dataset.msgid){
+      startImageDownload(wrap.dataset.msgid, wrap.dataset.url);
+    } else {
+      progArea.classList.toggle("show-cancel");
+    }
+    return;
+  }
+  const imgWrap = e.target.closest(".msg-image");
+  if(imgWrap && imgWrap.dataset.state === "done" && imgWrap.dataset.url){
+    window.open(imgWrap.dataset.url, "_blank");
+    return;
+  }
+  const fileWrap = e.target.closest(".msg-file");
+  if(fileWrap && fileWrap.dataset.url && !fileWrap.dataset.uploading){ window.open(fileWrap.dataset.url, "_blank"); return; }
 });
 
 /* =====================================================================
@@ -3870,7 +4269,7 @@ async function stopAndSendVoice(){
   if(!activeChatPeer || !activeChatId) return;
 
   const durationSec = Math.round(durationMs / 1000);
-  const tempId = "pending-voice-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   appendPendingVoiceBubble(tempId, durationSec);
 
   try{
@@ -3886,7 +4285,7 @@ async function stopAndSendVoice(){
       status: isAiChat ? "read" : "sent",
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
-    await db.collection("chats").doc(activeChatId).collection("messages").add(msgPayload);
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants:[currentUser.id, activeChatPeer.id],
@@ -3922,6 +4321,120 @@ $("#voiceCancelBtn").addEventListener("click", ()=> cancelVoiceRecording());
 window.addEventListener("beforeunload", ()=>{ if(voiceRecording) cancelVoiceRecording(); });
 
 /* =====================================================================
+   Attach menu (clip icon) — picking a picture from the gallery or any
+   file from the device. Both upload to Firebase Storage exactly like a
+   voice note does, then write a "image"/"file" message once the upload
+   finishes. The file input has no `accept` filter, so it also covers
+   picking an audio file straight from the device — no separate button
+   needed for that.
+   ===================================================================== */
+function closeAttachMenu(){ $("#attachMenu").classList.add("hidden"); }
+function toggleAttachMenu(){ $("#attachMenu").classList.toggle("hidden"); }
+$("#attachBtn").addEventListener("click", (e)=>{ e.stopPropagation(); toggleAttachMenu(); });
+document.addEventListener("click", (e)=>{
+  if($("#attachMenu").classList.contains("hidden")) return;
+  if(e.target.closest("#attachMenu") || e.target.closest("#attachBtn")) return;
+  closeAttachMenu();
+});
+$("#attachImageBtn").addEventListener("click", ()=>{ closeAttachMenu(); $("#attachImageInput").click(); });
+$("#attachFileBtn").addEventListener("click", ()=>{ closeAttachMenu(); $("#attachFileInput").click(); });
+
+async function sendImageFile(file){
+  if(!activeChatPeer || !activeChatId || !file) return;
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
+  const localUrl = URL.createObjectURL(file);
+  appendPendingImageBubble(tempId, localUrl);
+  try{
+    if(!storage) throw new Error("Firebase Storage غير مهيأ");
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const ref = storage.ref(`images/${activeChatId}/${tempId}.${ext}`);
+    const task = ref.put(file, { contentType: file.type || "image/jpeg" });
+    imageUploadTasks.set(tempId, task);
+    task.on("state_changed", (snap)=>{
+      const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes * 100) : 0;
+      updateUploadRingDOM(tempId, pct);
+    });
+    await task;
+    const url = await ref.getDownloadURL();
+    markImageUploadDone(tempId, url);
+
+    const isAiChat = activeChatPeer.id === AI_PEER_ID;
+    const msgPayload = {
+      senderId: currentUser.id, type:"image", imageUrl:url, imageSize:file.size,
+      status: isAiChat ? "read" : "sent",
+      ts: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
+    resolvePendingMessageBubble(tempId);
+    await db.collection("chats").doc(activeChatId).set({
+      participants:[currentUser.id, activeChatPeer.id],
+      lastMessage: "📷 صورة",
+      lastMessageSenderId: currentUser.id,
+      lastMessageStatus: isAiChat ? "read" : "sent",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+    }, { merge:true });
+    chatDocExistsForActive = true;
+  }catch(err){
+    removePendingMessageBubble(tempId);
+    if(!(err && err.code === "storage/canceled")){
+      console.error(err);
+      toast("تعذر إرسال الصورة", true);
+    }
+  }finally{
+    imageUploadTasks.delete(tempId);
+    URL.revokeObjectURL(localUrl);
+  }
+}
+
+async function sendGenericFile(file){
+  if(!activeChatPeer || !activeChatId || !file) return;
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
+  appendPendingFileBubble(tempId, file.name, file.size);
+  try{
+    if(!storage) throw new Error("Firebase Storage غير مهيأ");
+    const ref = storage.ref(`files/${activeChatId}/${tempId}_${file.name}`);
+    await ref.put(file, { contentType: file.type || "application/octet-stream" });
+    const url = await ref.getDownloadURL();
+
+    const isAiChat = activeChatPeer.id === AI_PEER_ID;
+    const msgPayload = {
+      senderId: currentUser.id, type:"file", fileUrl:url, fileName:file.name, fileSize:file.size,
+      status: isAiChat ? "read" : "sent",
+      ts: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
+    resolvePendingMessageBubble(tempId);
+    await db.collection("chats").doc(activeChatId).set({
+      participants:[currentUser.id, activeChatPeer.id],
+      lastMessage: "📎 " + file.name,
+      lastMessageSenderId: currentUser.id,
+      lastMessageStatus: isAiChat ? "read" : "sent",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+    }, { merge:true });
+    chatDocExistsForActive = true;
+  }catch(err){
+    console.error(err);
+    removePendingMessageBubble(tempId);
+    toast("تعذر إرسال الملف", true);
+  }
+}
+
+$("#attachImageInput").addEventListener("change", (e)=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(file) sendImageFile(file);
+});
+$("#attachFileInput").addEventListener("change", (e)=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(file) sendGenericFile(file);
+});
+
+/* =====================================================================
    Peer typing indicator — a little 3-dot bubble that appears on MY
    screen, at the very end/bottom of the messages list (right above the
    composer, like the newest incoming message would sit), whenever the
@@ -3944,7 +4457,7 @@ function showPeerTypingIndicator(){
     void node.offsetWidth; // force reflow so the slide-up-in transition actually plays
   }
   node.classList.add("ti-show");
-  if(wasNearBottom) msgsBox.scrollTop = msgsBox.scrollHeight;
+  if(wasNearBottom) setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
 }
 function removePeerTypingIndicator(){
   const node = $("#peerTypingIndicator");
@@ -3966,6 +4479,10 @@ $("#messages").addEventListener("scroll", updateScrollToBottomBtn);
 $("#scrollToBottomBtn").addEventListener("click", ()=>{
   const msgsBox = $("#messages");
   if(!msgsBox) return;
+  /* smooth scrolling fires several scroll events over its duration, not
+     just one, so this needs the guard held open for the whole animation
+     rather than the brief default window setMsgsScrollTop() uses */
+  msgsScrollGuardUntil = Date.now() + 900;
   msgsBox.scrollTo({ top: msgsBox.scrollHeight, behavior:"smooth" });
 });
 
@@ -4388,7 +4905,7 @@ $("#composer").addEventListener("submit", async (e)=>{
   const replySnapshot = replyingTo;
   clearReplyState();
 
-  const tempId = "pending-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   appendPendingMessageBubble(tempId, text, replySnapshot);
 
   try{
@@ -4405,7 +4922,7 @@ $("#composer").addEventListener("submit", async (e)=>{
     if(replySnapshot){
       msgPayload.replyTo = { id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text };
     }
-    await db.collection("chats").doc(activeChatId).collection("messages").add(msgPayload);
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants:[currentUser.id, activeChatPeer.id],
@@ -4436,10 +4953,12 @@ $("#blockBtn").addEventListener("click", async ()=>{
   if(!activeChatPeer) return;
   const isBlocked = (currentUser.blocked || []).includes(activeChatPeer.id);
   if(isBlocked){
-    if(!confirm(`تلغي حظر ${peerDisplayName(activeChatPeer)}؟`)) return;
+    const ok = await askConfirm("إلغاء الحظر", `تلغي حظر ${peerDisplayName(activeChatPeer)}؟`);
+    if(!ok) return;
     await unblockId(activeChatPeer.id);
   } else {
-    if(!confirm(`متأكد إنك عايز تحظر ${peerDisplayName(activeChatPeer)}؟`)) return;
+    const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
+    if(!ok) return;
     await blockId(activeChatPeer.id);
   }
 });
@@ -4522,16 +5041,9 @@ function renderBlockedList(){
   list.forEach(id=>{
     const row = document.createElement("div");
     row.className = "blocked-item";
-    row.innerHTML = `<span>${escapeHtml(id)}</span><button>إلغاء الحظر</button>`;
+    row.innerHTML = `<span class="blocked-id">${escapeHtml(id)}</span><button>إلغاء الحظر</button>`;
     row.querySelector("button").addEventListener("click", ()=> unblockId(id));
     box.appendChild(row);
-    /* Not-yet-registered users only have a placeholder profile, so keep
-       showing the ID for them — once they register, swap in their name. */
-    lookupUserById(id).then(peer=>{
-      if(peer && peer.uid){
-        row.querySelector("span").textContent = peer.name;
-      }
-    });
   });
 }
 

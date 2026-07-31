@@ -991,6 +991,28 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           </button>
         </div>
 
+        <!-- ---- Attach menu — small popover shown above the clip icon,
+             two choices: pick a picture from the gallery, or pick any
+             file from the device (this second one also covers audio
+             files, so there's no separate "voice file" button). Each
+             just triggers its own hidden <input type="file"> below. ---- -->
+        <div class="attach-menu hidden" id="attachMenu">
+          <button type="button" class="attach-menu-btn" id="attachImageBtn">
+            <span class="attach-menu-icon attach-menu-icon-image">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+            </span>
+            <span>صورة</span>
+          </button>
+          <button type="button" class="attach-menu-btn" id="attachFileBtn">
+            <span class="attach-menu-icon attach-menu-icon-file">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            </span>
+            <span>ملف</span>
+          </button>
+        </div>
+        <input type="file" id="attachImageInput" accept="image/*" hidden>
+        <input type="file" id="attachFileInput" hidden>
+
         <!-- ---- Voice-note recording bar — swaps in for .composer-pill the
              moment recording starts (see #composer.is-recording in style.css /
              the voice-recording block in script.js). The × here is the
@@ -1079,6 +1101,7 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           <p class="auth-error" id="settingsProfileMsg"></p>
           <button class="secondary-btn logout-btn" id="logoutBtn" type="button">تسجيل الخروج</button>
           <button class="secondary-btn danger-btn delete-account-btn" id="deleteAccountBtn" type="button">حذف الحساب نهائيًا</button>
+          <button class="secondary-btn change-password-btn" id="changePasswordBtn" type="button">تغيير كلمة السر</button>
         </div>
 
         <div class="settings-pane" id="pane-appearance">
@@ -1193,8 +1216,14 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
       </button>
     </div>
     <div class="friends-body">
+      <button type="button" class="add-contact-row" id="openAddContactBtn">
+        <span class="add-contact-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+        </span>
+        <span class="add-contact-label">جهة اتصال جديدة</span>
+      </button>
       <div class="friends-list" id="friendsList">
-        <p class="hint-text" id="friendsEmpty">لسه معندكش أي أصدقاء محفوظين. افتح شات أي حد واحفظه من صفحة ملفه.</p>
+        <p class="hint-text" id="friendsEmpty">لسه معندكش أي أصدقاء محفوظين. افتح شات أي حد واحفظه من صفحة ملفه، أو استخدم "جهة اتصال جديدة" فوق.</p>
       </div>
     </div>
     <button type="button" class="ai-friend-btn" id="openAiChatBtn">
@@ -1218,6 +1247,29 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     </div>
     <button type="button" class="primary-btn" id="confirmSaveFriendBtn">حفظ</button>
     <button type="button" class="secondary-btn" id="cancelSaveFriendBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- New-contact modal: add someone straight by their ID, without
+     needing an existing chat with them first ---- -->
+<div class="save-friend-overlay hidden" id="addContactOverlay">
+  <div class="save-friend-panel">
+    <h3>جهة اتصال جديدة</h3>
+    <div class="field">
+      <label>الاسم الأول</label>
+      <input type="text" id="addContactFirstNameInput" maxlength="30" placeholder="الاسم الأول">
+    </div>
+    <div class="field">
+      <label>اسم العائلة (اختياري)</label>
+      <input type="text" id="addContactLastNameInput" maxlength="30" placeholder="اسم العائلة">
+    </div>
+    <div class="field">
+      <label>رقم التعريف (11 رقم)</label>
+      <input type="text" id="addContactIdInput" maxlength="11" inputmode="numeric" placeholder="00000000000">
+    </div>
+    <p class="hint-text" id="addContactMsg"></p>
+    <button type="button" class="primary-btn" id="confirmAddContactBtn">حفظ</button>
+    <button type="button" class="secondary-btn" id="cancelAddContactBtn">إلغاء</button>
   </div>
 </div>
 
@@ -1252,6 +1304,16 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     حذف
   </button>
 </div>
+
+<!-- ---- Quick emoji-reaction bar: shown above the press point on a
+     long-press (phone/iPad), or fixed above the context menu on a
+     right-click (desktop) ---- -->
+<div class="reaction-bar hidden" id="reactionBar">
+  <span id="reactionBarQuick"></span>
+  <button type="button" class="reaction-bar-more" id="reactionBarMore" title="المزيد">+</button>
+</div>
+<!-- extra emoji grid, opened from the "+" button above -->
+<div class="reaction-grid hidden" id="reactionGrid"></div>
 
 <!-- ---- Right-click menu on a chat-list item (split/desktop view) ---- -->
 <div class="msg-menu hidden" id="chatListMenu">
@@ -1342,6 +1404,31 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     <button type="button" class="secondary-btn" id="deleteForMeBtn">حذف من عندي بس</button>
     <button type="button" class="secondary-btn danger-btn hidden" id="deleteForEveryoneBtn">حذف من عندنا الاتنين</button>
     <button type="button" class="secondary-btn" id="cancelDeleteBtn">إلغاء</button>
+  </div>
+</div>
+
+<!-- ---- Change password: asks for the old password, then the new one ---- -->
+<div class="delete-overlay hidden" id="changePasswordOverlay">
+  <div class="delete-panel">
+    <h3>تغيير كلمة السر</h3>
+    <p>اكتب كلمة السر القديمة، وبعدين كلمة السر الجديدة.</p>
+    <div class="password-input-wrap">
+      <input type="password" id="changePasswordOldInput" placeholder="كلمة السر القديمة" autocomplete="current-password">
+      <button type="button" class="password-toggle" data-target="changePasswordOldInput" aria-label="إظهار كلمة السر">
+        <svg class="eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.4 19.4 0 0 1 5.06-5.94M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+      </button>
+    </div>
+    <div class="password-input-wrap">
+      <input type="password" id="changePasswordNewInput" placeholder="كلمة السر الجديدة" autocomplete="new-password">
+      <button type="button" class="password-toggle" data-target="changePasswordNewInput" aria-label="إظهار كلمة السر">
+        <svg class="eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.4 19.4 0 0 1 5.06-5.94M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a19.5 19.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+      </button>
+    </div>
+    <p class="auth-error" id="changePasswordMsg"></p>
+    <button type="button" class="primary-btn" id="confirmChangePasswordBtn">تغيير</button>
+    <button type="button" class="secondary-btn" id="cancelChangePasswordBtn">إلغاء</button>
   </div>
 </div>
 

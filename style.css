@@ -336,6 +336,7 @@ input,textarea{font-family:inherit;}
 .logout-btn:hover{background:var(--error-soft); border-color:var(--error);}
 .delete-account-btn{width:100%; margin-top:8px; background:var(--error-soft); color:var(--error); border-color:var(--error);}
 .delete-account-btn:hover{background:var(--error); color:#fff;}
+.change-password-btn{width:100%; margin-top:28px;}
 
 /* =====================================================================
    3) APP SHELL
@@ -516,7 +517,9 @@ input,textarea{font-family:inherit;}
   touch-action: pan-y;
 }
 .msg.out{align-self:flex-start; background:var(--bubble-out); border-bottom-left-radius:4px; color:var(--ink);}
-.msg.out.pending{opacity:.6;}
+/* a message you just sent shows full-brightness right away — the single
+   tick already communicates "still sending", no need to also dim it,
+   which used to make it look faded/flickery for a moment. */
 .msg.in{align-self:flex-end; background:var(--bubble-in); border-bottom-right-radius:4px; color:var(--ink); border:1px solid var(--card-border);}
 .msg .msg-text{white-space:pre-wrap;}
 /* selection-mode highlight — a transparent tint of the user's own chat
@@ -545,6 +548,19 @@ input,textarea{font-family:inherit;}
 .msg-ticks{display:inline-flex; width:15px; height:11px; flex-shrink:0; color:var(--ink-dim);}
 .msg-ticks svg{width:100%; height:100%; display:block;}
 .msg-ticks.read{color:#53bdeb;}
+
+/* ---- little reaction badge overlapping a bubble's bottom edge ---- */
+.msg.has-reactions{margin-bottom:16px;}
+.msg-reactions{
+  position:absolute; bottom:-11px; display:flex; align-items:center; gap:2px;
+  background:var(--bg-2); border:1px solid var(--card-border); border-radius:11px;
+  padding:2px 6px; font-size:12.5px; line-height:1; box-shadow:var(--shadow); cursor:pointer;
+  user-select:none;
+}
+.msg-reactions.reaction-pop{animation:modalIn .3s ease;}
+.msg.out .msg-reactions{right:8px;}
+.msg.in .msg-reactions{left:8px;}
+.msg-reactions-count{font-size:10.5px; color:var(--ink-dim); font-family:var(--font-body);}
 /* quick pulse-in when jumping to a pinned message, then holds at a
    steady glow (via forwards) instead of fading straight back out —
    JS keeps this class on until the person scrolls/taps away, so it
@@ -751,6 +767,100 @@ input,textarea{font-family:inherit;}
 .msg.in .voice-track-fill{background:var(--chat-accent);}
 .voice-time{font-family:var(--font-mono); font-size:11px; color:inherit; opacity:.8; flex-shrink:0; white-space:nowrap;}
 
+/* =====================================================================
+   Attach menu — tiny popover above the clip icon with two choices
+   (image / file). Anchored to .composer (position:relative already set
+   further up), sits on the same side as the clip button itself.
+   ===================================================================== */
+.attach-menu{
+  position:absolute; bottom:calc(100% + 8px); left:16px;
+  display:flex; flex-direction:column; gap:2px; min-width:150px;
+  background:var(--card-bg, var(--input-bg)); border:1px solid var(--card-border);
+  border-radius:14px; padding:6px; box-shadow:0 12px 30px -8px rgba(0,0,0,.45);
+  z-index:20; animation:attachMenuIn .16s cubic-bezier(.2,.8,.2,1);
+}
+.attach-menu.hidden{display:none;}
+@keyframes attachMenuIn{
+  from{opacity:0; transform:translateY(6px) scale(.97);}
+  to{opacity:1; transform:translateY(0) scale(1);}
+}
+.attach-menu-btn{
+  display:flex; align-items:center; gap:10px; width:100%;
+  background:none; border:none; border-radius:10px; padding:9px 10px;
+  color:var(--ink); font-family:var(--font-body); font-size:13.5px; font-weight:600;
+  cursor:pointer; text-align:right; transition:.15s;
+}
+.attach-menu-btn:hover{background:var(--accent-soft);}
+.attach-menu-icon{
+  width:32px; height:32px; border-radius:9px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; color:#fff;
+}
+.attach-menu-icon-image{background:linear-gradient(135deg,#a855f7,#6366f1);}
+.attach-menu-icon-file{background:linear-gradient(135deg,#0ea5e9,#0369a1);}
+
+/* ---- image message bubble ----
+   Three visual states, toggled via [data-state] on .msg-image:
+   - idle        : blurred placeholder + "⬇ size" pill (received, not yet downloaded)
+   - uploading /
+     downloading : blurred image + circular progress ring, × cancels
+   - done        : full image, no blur, overlay faded out              */
+.msg-image{
+  position:relative; display:block; width:230px; height:172px;
+  border-radius:14px; overflow:hidden; cursor:pointer; background:var(--input-bg);
+}
+.msg-image-ph{
+  position:absolute; inset:0;
+  background:linear-gradient(115deg, rgba(128,128,128,.14) 25%, rgba(128,128,128,.28) 37%, rgba(128,128,128,.14) 63%);
+  background-size:400% 100%; animation:msgImgShimmer 1.6s ease-in-out infinite;
+}
+@keyframes msgImgShimmer{0%{background-position:100% 0;} 100%{background-position:0 0;}}
+.msg-image-img{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+  transition:filter .35s ease, opacity .25s ease;
+}
+.msg-image-img.hidden{opacity:0; pointer-events:none;}
+.msg-image-img.msg-image-blurred{filter:blur(16px) brightness(.72); transform:scale(1.1);}
+.msg-image[data-state="done"] .msg-image-ph{display:none;}
+.msg-image-overlay{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.16); transition:opacity .25s ease;
+}
+.msg-image[data-state="done"] .msg-image-overlay{opacity:0; pointer-events:none;}
+.msg-image-progress{position:relative; width:48px; height:48px; flex-shrink:0; cursor:pointer;}
+.msg-image-progress.hidden{display:none;}
+.msg-image-ring{position:absolute; inset:0; width:48px; height:48px; transform:rotate(-90deg);}
+.msg-image-ring .ring-track{fill:none; stroke:rgba(255,255,255,.28); stroke-width:3;}
+.msg-image-ring .ring-bar{fill:none; stroke:#fff; stroke-width:3; stroke-linecap:round; transition:stroke-dashoffset .12s linear;}
+.msg-image[data-state="paused"] .ring-bar{stroke:var(--error);}
+/* × only shows once the ring itself has been tapped once — before that,
+   it's just a quiet progress indicator (see .show-cancel, toggled in
+   script.js), so the picture isn't cluttered with a cancel button the
+   whole time it's auto-downloading/uploading. */
+.msg-image-cancel{
+  position:absolute; inset:0; margin:auto; width:26px; height:26px; border-radius:50%;
+  border:none; cursor:pointer; background:rgba(0,0,0,.55); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity .15s ease;
+}
+.msg-image-progress.show-cancel .msg-image-cancel{opacity:1; pointer-events:auto;}
+.msg-image-cancel svg{width:13px; height:13px; display:block;}
+.msg-image-caption{display:block; margin-top:6px; font-size:13.5px;}
+
+/* ---- generic file message bubble ---- */
+.msg-file{
+  display:flex; align-items:center; gap:10px; min-width:190px; max-width:260px;
+}
+.msg-file-icon{
+  width:38px; height:38px; border-radius:10px; flex-shrink:0;
+  background:var(--chat-accent); color:var(--chat-accent-ink);
+  display:flex; align-items:center; justify-content:center;
+}
+.msg-file-icon svg{width:19px; height:19px; display:block;}
+.msg-file-info{min-width:0; flex:1; display:flex; flex-direction:column; gap:2px;}
+.msg-file-name{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.msg-file-size{font-size:11px; opacity:.7; font-family:var(--font-mono);}
+.msg-file[data-uploading="1"]{opacity:.7;}
+
 /* ---- pinned message banner (top of chat) ---- */
 .pinned-banner{
   display:flex; align-items:center; gap:8px; padding:5px 18px; background:var(--input-bg);
@@ -793,6 +903,42 @@ input,textarea{font-family:inherit;}
 .msg-menu button:hover{background:var(--accent-soft); color:var(--chat-accent);}
 .msg-menu button.danger:hover{background:var(--error-soft); color:var(--error);}
 
+/* ---- quick emoji-reaction bar — long-press (touch) or right-click
+   (desktop, fixed above the context menu) ---- */
+.reaction-bar{
+  position:fixed; z-index:155; display:flex; align-items:center; gap:2px;
+  background:var(--card-bg); border:1px solid var(--card-border); border-radius:32px;
+  padding:6px 10px; box-shadow:var(--shadow); animation:modalIn .15s ease;
+  overflow:hidden;
+}
+.reaction-bar.hidden{display:none;}
+#reactionBarQuick{display:contents;}
+.reaction-bar-emoji{
+  background:none; border:none; cursor:pointer; font-size:25px; line-height:1;
+  padding:4px; border-radius:50%; transition:.12s transform ease, .12s background ease;
+}
+.reaction-bar-emoji:hover, .reaction-bar-emoji:active{transform:scale(1.22); background:var(--input-bg);}
+.reaction-bar-emoji.active{background:var(--input-bg);}
+.reaction-bar-more{
+  display:flex; align-items:center; justify-content:center; width:33px; height:33px; flex-shrink:0;
+  border-radius:50%; background:var(--input-bg); border:none; color:var(--ink-muted);
+  font-size:18px; cursor:pointer; transition:.12s;
+}
+.reaction-bar-more:hover{background:var(--accent-soft); color:var(--chat-accent);}
+
+/* ---- extended emoji grid opened via the reaction bar's "+" ---- */
+.reaction-grid{
+  position:fixed; z-index:156; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:16px; box-shadow:var(--shadow); padding:8px; display:grid;
+  grid-template-columns:repeat(6, 1fr); gap:1px; width:224px; animation:modalIn .15s ease;
+  overflow:hidden;
+}
+.reaction-grid.hidden{display:none;}
+.reaction-grid button{
+  background:none; border:none; font-size:21px; line-height:1; padding:6px; border-radius:8px; cursor:pointer;
+}
+.reaction-grid button:hover{background:var(--input-bg);}
+
 /* ---- delete choice modal ---- */
 .delete-overlay{
   position:fixed; inset:0; z-index:170; background:rgba(6,9,16,.55); backdrop-filter:blur(4px);
@@ -811,13 +957,18 @@ input,textarea{font-family:inherit;}
 .delete-panel .danger-btn{color:var(--error); border-color:var(--error-soft);}
 .delete-panel .danger-btn:hover{background:var(--error-soft); border-color:var(--error);}
 .delete-panel .danger-btn.hidden{display:none;}
-.delete-panel input[type="password"]{
+.delete-panel input{
   width:100%; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:10px;
   color:var(--ink); font-size:14px; padding:10px 12px; margin-bottom:6px; outline:none; transition:.15s;
   text-align:center; font-family:var(--font-body);
 }
-.delete-panel input[type="password"]:focus{border-color:var(--error); background:var(--error-soft);}
+.delete-panel input:focus{border-color:var(--error); background:var(--error-soft);}
+.delete-panel .password-input-wrap{width:100%;}
 .delete-panel .auth-error{margin:0 0 10px; min-height:14px;}
+/* change-password reuses .delete-panel's layout but isn't a destructive
+   action, so its inputs focus with the normal accent color instead of
+   the red "danger" color used by account deletion */
+#changePasswordOverlay input:focus{border-color:var(--chat-accent); background:var(--input-bg);}
 
 /* ---- Wasla AI opinion modal ---- */
 .ai-opinion-panel{max-width:380px; text-align:right;}
@@ -929,7 +1080,8 @@ input,textarea{font-family:inherit;}
 
 .hint-text{font-size:12.5px; color:var(--ink-dim); line-height:1.7; margin:6px 0 14px;}
 .blocked-list{display:flex; flex-direction:column; gap:8px;}
-.blocked-item{display:flex; align-items:center; justify-content:space-between; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:9px 12px; font-size:13px; font-family:var(--font-mono); direction:ltr;}
+.blocked-item{display:flex; align-items:center; justify-content:space-between; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:9px 12px; font-size:13px;}
+.blocked-item .blocked-id{font-family:var(--font-mono); direction:ltr; unicode-bidi:plaintext;}
 .blocked-item button{background:none; border:none; color:var(--error); font-size:12px; font-weight:700; font-family:var(--font-body); direction:rtl;}
 
 /* =====================================================================
@@ -1010,6 +1162,21 @@ input,textarea{font-family:inherit;}
 .friends-top{display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--card-border);}
 .friends-top h2{font-size:18px; margin:0;}
 .friends-body{flex:1; overflow-y:auto; padding:16px 20px 24px;}
+
+/* ---- "New contact" row, pinned above the saved-contacts list ---- */
+.add-contact-row{
+  display:flex; align-items:center; gap:12px; width:100%; margin-bottom:14px; padding:10px 12px; border-radius:14px;
+  background:color-mix(in srgb, var(--chat-accent) 12%, transparent);
+  border:none; cursor:pointer; text-align:right; font-family:inherit; color:var(--ink); transition:background .15s;
+}
+.add-contact-row:hover{background:color-mix(in srgb, var(--chat-accent) 18%, transparent);}
+.add-contact-row:active{background:color-mix(in srgb, var(--chat-accent) 4%, transparent);}
+.add-contact-icon{
+  flex-shrink:0; width:42px; height:42px; border-radius:50%; background:var(--chat-accent);
+  display:flex; align-items:center; justify-content:center; color:var(--chat-accent-ink);
+}
+.add-contact-label{font-size:14.5px; font-weight:700;}
+
 .friends-list{display:flex; flex-direction:column; gap:6px;}
 .friend-item{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:14px; cursor:pointer; transition:.15s; min-width:0;}
 .friend-item:hover{background:var(--input-bg);}
@@ -1126,6 +1293,17 @@ input,textarea{font-family:inherit;}
 }
 .emoji-panel-grid button:hover{background:var(--input-bg); transform:scale(1.15);}
 .emoji-panel-empty{color:var(--ink-dim); font-size:13px; text-align:center; padding:30px 10px;}
+
+/* ---- reaction "+" full picker (phone/tablet): composer is hidden while
+   this is open, and the panel itself gets more room to fill the space,
+   closer to the phone's own emoji keyboard than the small composer
+   popover this same panel is normally used as. Desktop instead reuses
+   the composer's own floating side popover as-is (see @media block
+   below), with the composer staying visible next to it. ---- */
+@media (max-width:767px){
+  .composer.reaction-emoji-active{display:none;}
+  .emoji-panel.reaction-mode{height:min(72vh, 620px);}
+}
 
 @media (min-width:768px){
   .emoji-panel{
