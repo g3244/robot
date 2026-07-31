@@ -53,6 +53,13 @@ let pendingBubbleNodes = new Map();
 let replyingTo = null;           // {id, senderId, text} snippet of the message being replied to
 let currentPinnedId = null;      // id of the currently pinned message in the open chat
 let contextMenuMsgId = null;     // message the right-click / long-press menu currently targets
+/* a finger is currently down on a .msg bubble (long-press window) — see
+   the #messages touchstart/touchend/touchcancel handlers further below.
+   While this is true, the messages snapshot listener must NOT wipe and
+   rebuild #messages (see flushPendingMsgsRender below for why). */
+let touchHoldActive = false;
+let pendingMsgsSnapshot = null;  // snapshot that arrived mid-hold, applied once the finger lifts
+let flushPendingMsgsRender = null; // set by openChat() each time a chat is opened
 let deleteTargetIds = [];        // message id(s) awaiting the delete-for-me / delete-for-everyone choice
 let lastDeletedForMeId = null;   // message id the thin "deleted for me" bar above the composer can undo
 let lastDeletedForMeChatId = null;
@@ -2247,9 +2254,10 @@ async function openChat(peer){
      reactions looked like last time, so only the one that actually
      changed gets to animate on the next redraw. */
   let reactionsRenderCache = {};
-  msgUnsub = db.collection("chats").doc(activeChatId).collection("messages")
-    .orderBy("ts","asc")
-    .onSnapshot(snap=>{
+  /* the actual rebuild, pulled out into its own function so it can be
+     re-run once a finger lifts (see the touchHoldActive guard below) as
+     well as from the live onSnapshot callback itself. */
+  const renderMsgsSnapshot = (snap) => {
       /* "smart scroll": remember how far from the bottom the person was
          BEFORE we wipe+rebuild the list below, so someone who's scrolled
          up reading old messages doesn't get yanked back down every time
@@ -2403,6 +2411,35 @@ async function openChat(peer){
           unreadCounts: { [currentUser.id]: 0 }
         }, {merge:true}).catch(()=>{});
       }
+  };
+  /* replays whatever snapshot arrived while a finger was held down on a
+     bubble, once that hold ends — see the guard in onSnapshot below for
+     why this is needed at all. */
+  flushPendingMsgsRender = () => {
+    if(pendingMsgsSnapshot){
+      const snap = pendingMsgsSnapshot;
+      pendingMsgsSnapshot = null;
+      renderMsgsSnapshot(snap);
+    }
+  };
+  msgUnsub = db.collection("chats").doc(activeChatId).collection("messages")
+    .orderBy("ts","asc")
+    .onSnapshot(snap=>{
+      /* a real friend chat marks the peer's messages "read" the instant
+         it's opened, which writes back into this very subcollection and
+         re-fires this listener seconds later — right as someone is very
+         likely long-pressing a message they just saw. Rebuilding
+         #messages (wipe + recreate every bubble) while a finger is still
+         down on one of those bubbles yanks that DOM node out from under
+         the touch, which the browser reports as touchcancel — silently
+         killing the long-press timer before it ever reaches the
+         reaction bar. Deferring the rebuild until the finger lifts fixes
+         that without giving up the "always rebuild from the live data"
+         simplicity elsewhere. The AI chat never hits this because its
+         own messages are written already-"read", so it rarely gets a
+         second snapshot mid-hold. */
+      if(touchHoldActive){ pendingMsgsSnapshot = snap; return; }
+      renderMsgsSnapshot(snap);
     }, err=> console.error("messages error", err));
 }
 
@@ -3571,6 +3608,11 @@ $("#messages").addEventListener("touchstart", (e)=>{
   const t = e.touches[0];
   touchStartX = t.clientX; touchStartY = t.clientY;
   longPressFired = false;
+  /* held from the very first touch, not just once the long-press timer
+     fires — a snapshot rebuild can land at any point during the hold,
+     not only after 480ms, and would just as easily kill the timer early
+     if it's allowed to yank this bubble's DOM node out mid-hold. */
+  touchHoldActive = true;
   clearTimeout(longPressTimer);
   longPressTimer = setTimeout(()=>{
     longPressFired = true;
@@ -3633,12 +3675,16 @@ $("#messages").addEventListener("touchend", ()=>{
   }
   if(swipeIcon){ swipeIcon.remove(); swipeIcon = null; }
   touchBubbleEl = null; touchTargetId = null;
+  touchHoldActive = false;
+  if(flushPendingMsgsRender) flushPendingMsgsRender();
 });
 $("#messages").addEventListener("touchcancel", ()=>{
   clearTimeout(longPressTimer);
   if(touchBubbleEl) touchBubbleEl.style.transform = "";
   if(swipeIcon){ swipeIcon.remove(); swipeIcon = null; }
   touchBubbleEl = null; touchTargetId = null;
+  touchHoldActive = false;
+  if(flushPendingMsgsRender) flushPendingMsgsRender();
 });
 
 /* ---- mouse-held-down long-press, only for the rare device that has
