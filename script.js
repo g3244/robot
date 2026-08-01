@@ -3048,6 +3048,19 @@ const QUICK_REACTIONS = ["👍","❤️","😂","😮","😢","🙏"];
 const EXTRA_REACTIONS = ["🥲","😡","🎉","🔥","👏","😍","🤔","😴","🙌","💯","🤦","🥳","😬","🤝","😱","👀","🙄","💔","😅","🤩","😭","🫶","🥸","👌"];
 
 let reactionBarMsgId = null;
+/* a scroll-close listener further below hides the reaction bar the
+   moment the messages list scrolls — needed so the picker doesn't sit
+   floating over the wrong spot once you've scrolled away from it. But
+   a long-press on a touch device very often coincides with a tiny,
+   unintentional scroll "wobble" of its own (the list settling under
+   the finger, a leftover bit of momentum, the header swapping to
+   selection mode) — that stray scroll event was closing the bar the
+   instant it opened, so it looked like it "never showed up". This
+   guard window ignores scroll-close for a brief moment right after
+   opening, exactly like the selection toolbar (which has no scroll
+   -close at all and so never has this problem), while still letting a
+   real, deliberate scroll close it once the guard has passed. */
+let reactionBarOpenGuardUntil = 0;
 
 function reactionsBadgeHTML(m, id, animate){
   if(!m.reactions) return "";
@@ -3103,6 +3116,7 @@ function openReactionBar(msgId, anchorX, anchorY){
   const m = messagesData[msgId];
   if(!m || m.deletedForEveryone) return;
   reactionBarMsgId = msgId;
+  reactionBarOpenGuardUntil = Date.now() + 400;
   closeReactionGrid();
   const bar = $("#reactionBar");
   const mine = m.reactions && m.reactions[currentUser.id];
@@ -3223,7 +3237,7 @@ document.addEventListener("click", (e)=>{
   if(emojiPanelReactionMode && e.target.closest("#emojiPanel")) return;
   closeReactionBar();
 }, true);
-document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll()) closeReactionBar(); }, true);
+document.addEventListener("scroll", (e)=>{ if(!isProgrammaticScroll() && Date.now() > reactionBarOpenGuardUntil) closeReactionBar(); }, true);
 
 /* =====================================================================
    6.4) MESSAGE CONTEXT MENU — right-click on desktop, long-press on touch
@@ -3645,6 +3659,13 @@ $("#messages").addEventListener("touchstart", (e)=>{
     longPressFired = true;
     if(navigator.vibrate) navigator.vibrate(15);
     if(isSelectionMode()){
+      /* already selecting: a long-press on another message adds it to
+         the batch (same as it always did) — but it should NOT also pop
+         the reaction bar. The reaction bar is for reacting to one
+         message, which only makes sense as the very first long-press
+         (the one that starts selection mode fresh, in the else branch
+         below) — once you're building a multi-select, further
+         long-presses are purely about picking more messages. */
       const nowTap = Date.now();
       const isRapidRepeat = touchTargetId === lastSelectionTapId && (nowTap - lastSelectionTapTime) < SELECTION_TAP_DEBOUNCE_MS;
       lastSelectionTapId = touchTargetId;
@@ -3654,11 +3675,11 @@ $("#messages").addEventListener("touchstart", (e)=>{
       /* any real touch device — phone or iPad — long-press starts the
          same toolbar-based multi-select, regardless of screen width */
       enterSelectionMode(touchTargetId);
+      /* the reaction bar shows above the exact spot pressed, not
+         necessarily above the whole bubble — on a tall message it stays
+         pinned over the finger's position rather than the message's top */
+      openReactionBar(touchTargetId, touchStartX, touchStartY);
     }
-    /* the reaction bar shows above the exact spot pressed, not
-       necessarily above the whole bubble — on a tall message it stays
-       pinned over the finger's position rather than the message's top */
-    openReactionBar(touchTargetId, touchStartX, touchStartY);
   }, LONG_PRESS_MS);
 }, {passive:true});
 
@@ -3673,8 +3694,14 @@ $("#messages").addEventListener("touchmove", (e)=>{
      that tiny drift was cancelling the long-press timer AND kicking
      off the swipe-reply icon below, which then never reached
      SWIPE_TRIGGER and got reset on release — visually just a quick
-     flash for nothing */
-  if(Math.abs(dx) > 18 || Math.abs(dy) > 18) clearTimeout(longPressTimer);
+     flash for nothing. Measured as straight-line distance rather than
+     per-axis: the old per-axis check cancelled the timer the instant
+     EITHER axis alone passed 18px, which on a real thumb (curling
+     motion drifts diagonally) was tripping well before the finger had
+     actually moved 18px in any single meaningful direction — that's
+     why the reaction bar was so often just never showing up. */
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if(dist > 30) clearTimeout(longPressTimer);
   if(dx > 18 && Math.abs(dy) < 40){
     const clamped = Math.min(dx, SWIPE_MAX);
     touchBubbleEl.style.transform = `translateX(${clamped}px)`;
