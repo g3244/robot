@@ -5371,12 +5371,21 @@ $$(".password-toggle").forEach(btn=>{
    (where the composer lives) sitting behind the keyboard. Resizing .app
    to match window.visualViewport keeps the composer above the keyboard
    whenever the message box (or anything else) is focused.
-   ===================================================================== */
+
+   Height alone isn't enough though: .app is anchored via inset:0 to the
+   LAYOUT viewport's top-left, but opening the keyboard can shift the
+   VISUAL viewport down a bit (visualViewport.offsetTop > 0) without
+   moving the layout viewport at all. That mismatch is exactly what left
+   a gap between the composer and the keyboard — .app kept its top edge
+   pinned to the layout viewport's top while the visible area had moved
+   down under it. Translating .app by that same offset keeps it glued to
+   what's actually on screen instead of floating up above it. */
 if(window.visualViewport){
   const appEl = document.querySelector(".app");
   const syncViewportHeight = () => {
     if(!appEl) return;
     appEl.style.height = window.visualViewport.height + "px";
+    appEl.style.top = window.visualViewport.offsetTop + "px";
   };
   window.visualViewport.addEventListener("resize", syncViewportHeight);
   window.visualViewport.addEventListener("scroll", syncViewportHeight);
