@@ -989,6 +989,9 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           <button type="button" class="composer-icon-btn" id="attachBtn" title="إرفاق ملف">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </button>
+          <button type="button" class="composer-icon-btn hidden" id="cancelEditBtn" title="إلغاء التعديل">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
         </div>
 
         <!-- ---- Attach menu — small popover shown above the clip icon,
@@ -1504,6 +1507,10 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     نسخ
   </button>
+  <button type="button" data-action="edit" id="msgMenuEdit">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+    تعديل
+  </button>
   <button type="button" data-action="pin" id="msgMenuPin">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1z"/></svg>
     <span class="lbl">تثبيت</span>
@@ -1530,6 +1537,10 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
 
 <!-- ---- Right-click menu on a chat-list item (split/desktop view) ---- -->
 <div class="msg-menu hidden" id="chatListMenu">
+  <button type="button" data-action="select">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <span>تحديد</span>
+  </button>
   <button type="button" data-action="delete">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
     <span>حذف الشات</span>
@@ -1549,6 +1560,10 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   <button type="button" data-action="copy">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     نسخ
+  </button>
+  <button type="button" data-action="edit" id="selectionMoreEdit">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+    تعديل
   </button>
 </div>
 

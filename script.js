@@ -51,6 +51,26 @@ let messagesData = {};           // messageId -> message data, for the open chat
    fails (see removePendingMessageBubble). */
 let pendingBubbleNodes = new Map();
 let replyingTo = null;           // {id, senderId, text} snippet of the message being replied to
+let editingMessageId = null;     // id of the message currently being edited via the composer, or null
+let preEditScrollTop = null;     // chat's scrollTop right before entering edit mode, so we can return to it after
+const EDIT_WINDOW_MS = 15 * 60 * 1000;              // can only edit a message within 15 minutes of sending it
+const DELETE_EVERYONE_WINDOW_MS = 24 * 60 * 60 * 1000; // "delete for everyone" only within 24 hours of sending it
+function msgSentDate(m){
+  if(!m || !m.ts) return null;
+  return m.ts.toDate ? m.ts.toDate() : new Date(m.ts);
+}
+function canEditMessage(m){
+  if(!m || m.deletedForEveryone || m.type || m.senderId !== currentUser.id) return false;
+  const sentAt = msgSentDate(m);
+  if(!sentAt) return false;
+  return (Date.now() - sentAt.getTime()) < EDIT_WINDOW_MS;
+}
+function canDeleteForEveryone(m){
+  if(!m || m.deletedForEveryone || m.senderId !== currentUser.id) return false;
+  const sentAt = msgSentDate(m);
+  if(!sentAt) return false;
+  return (Date.now() - sentAt.getTime()) < DELETE_EVERYONE_WINDOW_MS;
+}
 let currentPinnedId = null;      // id of the currently pinned message in the open chat
 let contextMenuMsgId = null;     // message the right-click / long-press menu currently targets
 /* a finger is currently down on a .msg bubble (long-press window) — see
@@ -2734,6 +2754,7 @@ async function openChat(peer){
   };
 
   clearReplyState();
+  cancelEditIfActive();
   hideDeletedForMeBar();
   messagesData = {};
   pendingBubbleNodes.clear();
@@ -2812,7 +2833,7 @@ async function openChat(peer){
         }
         const isOut = m.senderId === currentUser.id;
         const bubble = document.createElement("div");
-        bubble.className = "msg " + (isOut ? "out" : "in") + (m.deletedForEveryone ? " deleted" : "") + (selectedMsgIds.has(doc.id) || contextMenuMsgId === doc.id ? " selected" : "");
+        bubble.className = "msg " + (isOut ? "out" : "in") + (m.deletedForEveryone ? " deleted" : "") + (selectedMsgIds.has(doc.id) || contextMenuMsgId === doc.id ? " selected" : "") + (editingMessageId === doc.id ? " editing-target" : "");
         bubble.dataset.id = doc.id;
         const pinBadge = currentPinnedIds.has(doc.id) ? `<span class="msg-pin-badge">${PIN_BADGE_ICON}</span>` : "";
         let inner = "";
@@ -2850,7 +2871,7 @@ async function openChat(peer){
           } else {
             inner += `<span class="msg-text">${escapeHtml(m.text)}</span>`;
           }
-          inner += `<span class="msg-meta">${pinBadge}<time>${fmtTime(m.ts)}</time>`;
+          inner += `<span class="msg-meta">${pinBadge}${m.editedAt ? `<span class="msg-edited-label">تم تعديلها</span>` : ""}<time>${fmtTime(m.ts)}</time>`;
           if(isOut){
             const status = displayStatus(m.status || "sent");
             if(status === "read"){
@@ -3183,6 +3204,7 @@ function closeActiveChat(){
   messagesData = {}; currentPinnedId = null; pinnedFocusIndex = 0; pinnedMessagesList = [];
   clearTimeout(pinnedExpiryTimer);
   clearReplyState();
+  cancelEditIfActive();
   hideDeletedForMeBar();
   exitSelectionMode();
   $("#pinnedBanner").classList.add("hidden");
@@ -3466,6 +3488,11 @@ $$("#pinDurationOverlay button[data-duration]").forEach(btn=>{
 function setReplyTo(id){
   const m = messagesData[id];
   if(!m) return;
+  if(editingMessageId){
+    exitEditMode();
+    $("#messageInput").value = "";
+    autoResizeComposer();
+  }
   const isOut = m.senderId === currentUser.id;
   const isPoll = m.type === "poll";
   const previewText = isPoll ? ((m.poll && m.poll.question) || "") : (m.text || "").slice(0,300);
@@ -3482,6 +3509,126 @@ function clearReplyState(){
   $("#replyPreviewText").innerHTML = "";
 }
 $("#cancelReplyBtn").addEventListener("click", clearReplyState);
+
+/* =====================================================================
+   6.2b) EDIT MESSAGE — WhatsApp-style: loads the message's own text into
+   the composer with a preview bar above it (same visual slot as the
+   reply preview, reusing its CSS), swaps the send button to a green
+   checkmark, and on submit updates the existing message doc in place
+   (adding editedAt) instead of creating a new one. Only ever offered
+   for the sender's own plain-text messages that haven't been deleted.
+   ===================================================================== */
+function startEditMessage(id){
+  const m = messagesData[id];
+  if(!canEditMessage(m)) return;
+  clearReplyState();
+  editingMessageId = id;
+  preEditScrollTop = $("#messages").scrollTop;
+  $("#messages").classList.add("edit-mode-dim");
+  $("#scrollToBottomBtn").classList.remove("stbb-show");
+  $("#composer").classList.add("is-editing");
+  $("#attachBtn").classList.add("hidden");
+  $("#cancelEditBtn").classList.remove("hidden");
+  const input = $("#messageInput");
+  input.value = m.text || "";
+  autoResizeComposer();
+  input.focus({preventScroll:true});
+  input.setSelectionRange(input.value.length, input.value.length);
+  const bubble = document.querySelector(`.msg[data-id="${id}"]`);
+  if(bubble) bubble.classList.add("editing-target");
+  if(bubble){
+    /* always bring the message being edited down to sit right above the
+       composer, no matter where it currently is (even scrolled way up)
+       — smooth animation, block:"end" so it lands at the bottom of the
+       visible chat area instead of the top */
+    editScrollLocking = false; // let this animation run freely
+    clearTimeout(editScrollLockTimer);
+    bubble.scrollIntoView({block:"end", behavior:"smooth"});
+    /* once the smooth scroll has had time to finish, freeze the
+       scroll position in place — this is what stops a scrollbar-drag
+       (which fires plain "scroll" events, same as wheel/touch) from
+       moving the chat while still editing */
+    editScrollLockTimer = setTimeout(()=>{
+      editScrollLockTop = $("#messages").scrollTop;
+      editScrollLocking = true;
+    }, 450);
+  }
+}
+function exitEditMode(){
+  editingMessageId = null;
+  editScrollLocking = false;
+  clearTimeout(editScrollLockTimer);
+  $("#messages").classList.remove("edit-mode-dim");
+  updateScrollToBottomBtn();
+  $$(".msg.editing-target").forEach(el=> el.classList.remove("editing-target"));
+  $("#composer").classList.remove("is-editing");
+  $("#attachBtn").classList.remove("hidden");
+  $("#cancelEditBtn").classList.add("hidden");
+}
+/* while a message is being edited, the chat is pinned in place right
+   above the composer — block manual scrolling (wheel/trackpad, touch
+   drag, arrow/space/page keys, AND dragging the scrollbar thumb) so
+   the person can't scroll the edited bubble out of view mid-edit.
+   editScrollLocking only turns on after the entrance animation in
+   startEditMessage finishes, so it never fights that animation. */
+let editScrollLocking = false;
+let editScrollLockTop = 0;
+let editScrollLockTimer = null;
+(function setupEditScrollLock(){
+  const msgsBox = $("#messages");
+  const scrollKeys = new Set(["ArrowUp","ArrowDown","PageUp","PageDown","Home","End"," ","Spacebar"]);
+  msgsBox.addEventListener("wheel", (e)=>{
+    if(editingMessageId) e.preventDefault();
+  }, {passive:false});
+  msgsBox.addEventListener("touchmove", (e)=>{
+    if(editingMessageId) e.preventDefault();
+  }, {passive:false});
+  msgsBox.addEventListener("keydown", (e)=>{
+    if(editingMessageId && scrollKeys.has(e.key)) e.preventDefault();
+  });
+  /* catches scrollbar-thumb dragging specifically — wheel/touchmove
+     don't fire for that, but "scroll" always does, so once locked we
+     just snap straight back to the frozen position */
+  msgsBox.addEventListener("scroll", ()=>{
+    if(editingMessageId && editScrollLocking && msgsBox.scrollTop !== editScrollLockTop){
+      msgsBox.scrollTop = editScrollLockTop;
+    }
+  });
+})();
+/* used anywhere the chat itself is switched/closed while mid-edit, so
+   the half-edited text never lingers in the box and gets accidentally
+   sent as a brand-new message to a different chat */
+function cancelEditIfActive(){
+  if(!editingMessageId) return;
+  exitEditMode();
+  $("#messageInput").value = "";
+  autoResizeComposer();
+  preEditScrollTop = null;
+}
+$("#cancelEditBtn").addEventListener("click", ()=>{
+  exitEditMode();
+  $("#messageInput").value = "";
+  autoResizeComposer();
+  const msgsBox = $("#messages");
+  if(msgsBox && preEditScrollTop !== null){
+    msgsScrollGuardUntil = Date.now() + 900;
+    msgsBox.scrollTo({ top: preEditScrollTop, behavior:"smooth" });
+    preEditScrollTop = null;
+  }
+});
+async function commitMessageEdit(id, newText){
+  if(!activeChatId) return;
+  try{
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(id).set({
+      text: newText,
+      editedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge:true});
+    /* keep the chat-list preview in sync if this was the last message */
+    if(activeChatDocData && activeChatDocData.lastMessageId === id){
+      await db.collection("chats").doc(activeChatId).set({ lastMessage: newText }, {merge:true});
+    }
+  }catch(err){ console.error(err); toast("تعذر تعديل الرسالة", true); }
+}
 
 /* =====================================================================
    6.2b) GENERIC YES/NO CONFIRM MODAL — a centered in-app message that
@@ -3520,6 +3667,8 @@ function openDeleteModal(ids, isOut){
   $("#deleteModalTitle").textContent = many ? "حذف الرسائل" : "حذف الرسالة";
   $("#deleteModalText").textContent = many ? `عايز تحذف الـ ${ids.length} رسائل دي منين؟` : "عايز تحذفها منين؟";
   const isAiChat = activeChatPeer && activeChatPeer.id === AI_PEER_ID;
+  const isGroupChat = !!(activeChatPeer && activeChatPeer.isGroup);
+  $("#deleteForEveryoneBtn").textContent = isGroupChat ? "حذف من عند الجميع" : "حذف من عندنا الاتنين";
   $("#deleteForEveryoneBtn").classList.toggle("hidden", !isOut || isAiChat);
   $("#deleteOverlay").classList.remove("hidden");
 }
@@ -3584,6 +3733,10 @@ $("#deleteForEveryoneBtn").addEventListener("click", async ()=>{
   if(!deleteTargetIds.length || !activeChatId) return;
   const ids = deleteTargetIds;
   const chatId = activeChatId;
+  if(!ids.every(id=> canDeleteForEveryone(messagesData[id]))){
+    closeDeleteModal();
+    return;
+  }
   closeDeleteModal();
   try{
     /* soft-delete: keep the doc, wipe its content, flag it — this is
@@ -3609,7 +3762,7 @@ $("#deleteForEveryoneBtn").addEventListener("click", async ()=>{
         }, {merge:true});
       });
       await batch.commit();
-      toast("اتمسحت الرسائل من عندكم الاتنين");
+      toast(activeChatPeer && activeChatPeer.isGroup ? "اتمسحت الرسائل من عند الجميع" : "اتمسحت الرسائل من عندكم الاتنين");
     }
     const pinnedAmongThese = ids.filter(id=> currentPinnedIds.has(id));
     if(pinnedAmongThese.length){
@@ -3837,6 +3990,8 @@ function openMsgMenu(id, x, y){
   $("#msgMenuReply").classList.toggle("hidden", isDeleted);
   $("#msgMenuCopy").classList.toggle("hidden", isDeleted);
   $("#msgMenuPin").classList.toggle("hidden", isDeleted);
+  const canEdit = canEditMessage(m);
+  $("#msgMenuEdit").classList.toggle("hidden", !canEdit);
   const isPinned = currentPinnedIds.has(id);
   const pinLabel = $("#msgMenuPin .lbl");
   if(pinLabel) pinLabel.textContent = isPinned ? "إلغاء التثبيت" : "تثبيت";
@@ -3925,8 +4080,10 @@ $("#msgMenu").addEventListener("click", async (e)=>{
       pendingPinTargetId = id;
       $("#pinDurationOverlay").classList.remove("hidden");
     }
+  } else if(action === "edit"){
+    startEditMessage(id);
   } else if(action === "delete"){
-    openDeleteModal([id], m.senderId === currentUser.id && !m.deletedForEveryone);
+    openDeleteModal([id], canDeleteForEveryone(m));
   } else if(action === "select"){
     enterSelectionMode(id);
   }
@@ -4051,7 +4208,7 @@ $("#selectionDeleteBtn").addEventListener("click", async ()=>{
     if(!m) return;
     /* opens the existing delete-for-me/delete-for-everyone modal;
        closeDeleteModal() (below) exits selection mode once it's done */
-    openDeleteModal([id], m.senderId === currentUser.id && !m.deletedForEveryone);
+    openDeleteModal([id], canDeleteForEveryone(m));
     return;
   }
 
@@ -4064,7 +4221,7 @@ $("#selectionDeleteBtn").addEventListener("click", async ()=>{
        for them), so this just deletes for me directly, no modal */
   const allMine = ids.every(id=>{
     const m = messagesData[id];
-    return m && m.senderId === currentUser.id && !m.deletedForEveryone;
+    return canDeleteForEveryone(m);
   });
 
   if(allMine){
@@ -4089,6 +4246,8 @@ function openSelectionMoreMenu(){
   const isPinned = currentPinnedIds.has(id);
   const pinLabel = $("#selectionMorePin .lbl");
   if(pinLabel) pinLabel.textContent = isPinned ? "إلغاء التثبيت" : "تثبيت";
+  const canEdit = canEditMessage(m);
+  $("#selectionMoreEdit").classList.toggle("hidden", !canEdit);
   menu.classList.remove("hidden");
   const btn = $("#selectionMoreBtn");
   const rect = btn.getBoundingClientRect();
@@ -4126,6 +4285,9 @@ $("#selectionMoreMenu").addEventListener("click", async (e)=>{
   if(action === "copy"){
     copyText(m.text || "").then(()=> toast("تم نسخ الرسالة")).catch(()=> toast("تعذر نسخ الرسالة، انسخها يدويًا", true));
     exitSelectionMode();
+  } else if(action === "edit"){
+    exitSelectionMode();
+    startEditMessage(id);
   } else if(action === "pin"){
     if(currentPinnedIds.has(id)){
       await togglePin(id, m);
@@ -4385,7 +4547,8 @@ function openChatListMenu(peerId, x, y){
   closeChatListMenu();
   contextMenuChatPeerId = peerId;
   const menu = $("#chatListMenu");
-  $("#chatListMenuBlock").classList.toggle("hidden", peerId === AI_PEER_ID);
+  const isGroupPeer = !!(peerCache[peerId] && peerCache[peerId].isGroup);
+  $("#chatListMenuBlock").classList.toggle("hidden", peerId === AI_PEER_ID || isGroupPeer);
   const item = document.querySelector(`.chat-item[data-peer-id="${peerId}"]`);
   if(item) item.classList.add("selected");
   menu.classList.remove("hidden");
@@ -4424,13 +4587,15 @@ $("#chatListMenu").addEventListener("click", async (e)=>{
   const peerId = contextMenuChatPeerId;
   const action = btn.dataset.action;
   closeChatListMenu();
-  if(action === "delete"){
+  if(action === "select"){
+    enterChatListSelection(peerId);
+  } else if(action === "delete"){
     const ok1 = await askConfirm("حذف الشات", "هل تريد حذف الشات؟");
     if(!ok1) return;
     const ok = await deleteChatForPeer(peerId);
     if(ok) toast("اتمسح الشات");
   } else if(action === "block"){
-    if(peerId === AI_PEER_ID) return;
+    if(peerId === AI_PEER_ID || (peerCache[peerId] && peerCache[peerId].isGroup)) return;
     const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
     if(!ok) return;
     await blockId(peerId);
@@ -4446,7 +4611,8 @@ function updateChatListSelectionUI(){
   /* blocking only makes sense targeting exactly one real person */
   const ids = [...chatListSelectedIds];
   const singleId = ids.length === 1 ? ids[0] : null;
-  $("#chatListSelectionBlockBtn").classList.toggle("hidden", !singleId || singleId === AI_PEER_ID);
+  const singleIsGroup = !!(singleId && peerCache[singleId] && peerCache[singleId].isGroup);
+  $("#chatListSelectionBlockBtn").classList.toggle("hidden", !singleId || singleId === AI_PEER_ID || singleIsGroup);
 }
 function enterChatListSelection(peerId){
   chatListSelectionActive = true;
@@ -4471,7 +4637,7 @@ $("#chatListSelectionCancelBtn").addEventListener("click", exitChatListSelection
 
 $("#chatListSelectionBlockBtn").addEventListener("click", async ()=>{
   const ids = [...chatListSelectedIds];
-  if(ids.length !== 1 || ids[0] === AI_PEER_ID) return;
+  if(ids.length !== 1 || ids[0] === AI_PEER_ID || (peerCache[ids[0]] && peerCache[ids[0]].isGroup)) return;
   const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
   if(!ok) return;
   await blockId(ids[0]);
@@ -4580,6 +4746,7 @@ async function deleteChatForPeer(peerId, opts={}){
         currentPinnedId = null; pinnedFocusIndex = 0; pinnedMessagesList = [];
         clearTimeout(pinnedExpiryTimer);
         clearReplyState();
+        cancelEditIfActive();
         $("#pinnedBanner").classList.add("hidden");
       } else {
         /* close it out entirely, exactly like the header's delete
@@ -4590,6 +4757,7 @@ async function deleteChatForPeer(peerId, opts={}){
         messagesData = {}; currentPinnedId = null; pinnedFocusIndex = 0; pinnedMessagesList = [];
         clearTimeout(pinnedExpiryTimer);
         clearReplyState();
+        cancelEditIfActive();
         $("#pinnedBanner").classList.add("hidden");
         saveLastChat("");
         $("#app").classList.remove("chat-open");
@@ -5415,7 +5583,7 @@ function updateScrollToBottomBtn(){
   const btn = $("#scrollToBottomBtn");
   if(!msgsBox || !btn) return;
   const distanceFromBottom = msgsBox.scrollHeight - msgsBox.scrollTop - msgsBox.clientHeight;
-  btn.classList.toggle("stbb-show", distanceFromBottom > 150);
+  btn.classList.toggle("stbb-show", !editingMessageId && distanceFromBottom > 150);
 }
 $("#messages").addEventListener("scroll", updateScrollToBottomBtn);
 $("#scrollToBottomBtn").addEventListener("click", ()=>{
@@ -5825,6 +5993,23 @@ $("#composer").addEventListener("submit", async (e)=>{
   const input = $("#messageInput");
   const text = input.value.trim();
   if(!text || !activeChatPeer) return;
+
+  if(editingMessageId){
+    const id = editingMessageId;
+    const m = messagesData[id];
+    exitEditMode();
+    input.value = "";
+    autoResizeComposer();
+    const msgsBox = $("#messages");
+    if(msgsBox && preEditScrollTop !== null){
+      msgsScrollGuardUntil = Date.now() + 900;
+      msgsBox.scrollTop = preEditScrollTop;
+      preEditScrollTop = null;
+    }
+    if(!canEditMessage(m)) return;
+    await commitMessageEdit(id, text);
+    return;
+  }
 
   /* Both block checks now read from state that's already kept live in
      memory (watchPeer keeps activeChatPeer.blocked in sync in real
