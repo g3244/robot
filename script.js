@@ -751,6 +751,19 @@ function onGateSuccess(){
         if(snap.exists){
           currentUser = { uid:user.uid, ...snap.data() };
           if(!Array.isArray(currentUser.savedContacts)) currentUser.savedContacts = [];
+          /* people blocked before this feature existed have no blockedAt
+             entry yet — backfill one now (starting from "now") so their
+             messages start being hidden going forward, without touching
+             anything already in the chat history */
+          if(!currentUser.blockedAt) currentUser.blockedAt = {};
+          if(Array.isArray(currentUser.blocked) && currentUser.blocked.length){
+            const missing = currentUser.blocked.filter(id=> currentUser.blockedAt[id] == null);
+            if(missing.length){
+              const patch = {};
+              missing.forEach(id=>{ currentUser.blockedAt[id] = Date.now(); patch[`blockedAt.${id}`] = firebase.firestore.FieldValue.serverTimestamp(); });
+              db.collection("users").doc(user.uid).update(patch).catch(()=>{});
+            }
+          }
           enterApp();
         } else {
           $("#authScreen").classList.remove("hidden");
@@ -2062,7 +2075,13 @@ function refreshPeerUI(id, data){
     /* "contacts only" = someone I've actually exchanged at least one
        real message with, not just anyone who opened an empty chat */
     const isContact = !!(activeChatDocData && activeChatDocData.lastMessage);
-    const canSeeStatus = privacy === "everyone" || (privacy === "contacts" && isContact);
+    /* blocking (either direction) hides online/last-seen no matter what
+       the privacy setting says — same as it hides messages, this must
+       work both ways: I don't get to peek at someone I've blocked, and
+       someone who blocked me doesn't get to see me either */
+    const iBlockedThem = Array.isArray(currentUser.blocked) && currentUser.blocked.includes(id);
+    const theyBlockedMe = !!peerBlockHidden[id];
+    const canSeeStatus = !iBlockedThem && !theyBlockedMe && (privacy === "everyone" || (privacy === "contacts" && isContact));
     if(canSeeStatus && data.online){
       statusEl.textContent = "متصل الآن";
       statusEl.classList.remove("hidden");
@@ -2822,6 +2841,18 @@ async function openChat(peer){
         /* messages "deleted for me" stay in Firestore for the other side,
            but must never render on my screen again */
         if(Array.isArray(m.deletedFor) && m.deletedFor.includes(currentUser.id)) return;
+        /* someone I've blocked messaging me AFTER the block must never
+           show up here — leaving and coming back to the chat must not
+           let it slip through either, since this filter runs fresh on
+           every render (including the very first one when the chat is
+           opened), not just live updates while it happened to be open */
+        if(!isGroupChat && Array.isArray(currentUser.blocked) && currentUser.blocked.includes(m.senderId)){
+          const blockedSince = blockedAtMillis(m.senderId);
+          if(blockedSince !== null){
+            const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
+            if(msgMillis === null || msgMillis > blockedSince) return;
+          }
+        }
         messagesData[doc.id] = m;
         const d = m.ts ? (m.ts.toDate ? m.ts.toDate() : new Date(m.ts)) : new Date();
         const dayStr = d.toLocaleDateString("ar-EG", {day:"numeric", month:"long"});
@@ -6100,26 +6131,47 @@ $("#blockBtn").addEventListener("click", async ()=>{
   }
 });
 
+/* the moment I block someone, anything they send AFTER that point must
+   stop reaching me at all (not just fake their delivery tick) — this
+   reads back the timestamp recorded at block time so the messages
+   listener can tell "before the block" (still shown, like normal chat
+   history) apart from "after the block" (hidden, never arrives). */
+function blockedAtMillis(peerId){
+  if(!currentUser.blockedAt) return null;
+  const v = currentUser.blockedAt[peerId];
+  if(v == null) return null;
+  if(typeof v === "number") return v;
+  if(typeof v.toMillis === "function") return v.toMillis();
+  if(typeof v.seconds === "number") return v.seconds * 1000;
+  return null;
+}
 async function blockId(id){
   if(id === currentUser.id){ toast("متقدرش تحظر نفسك", true); return; }
   try{
     await db.collection("users").doc(currentUser.uid).update({
-      blocked: firebase.firestore.FieldValue.arrayUnion(id)
+      blocked: firebase.firestore.FieldValue.arrayUnion(id),
+      [`blockedAt.${id}`]: firebase.firestore.FieldValue.serverTimestamp()
     });
     if(!currentUser.blocked.includes(id)) currentUser.blocked.push(id);
+    if(!currentUser.blockedAt) currentUser.blockedAt = {};
+    currentUser.blockedAt[id] = Date.now();
     renderBlockedList();
     updateBlockBanner();
+    if(activeChatPeer && activeChatPeer.id === id) refreshPeerUI(id, peerCache[id] || activeChatPeer);
     toast("تم الحظر");
   }catch(err){ console.error(err); toast("حصل خطأ أثناء الحظر", true); }
 }
 async function unblockId(id){
   try{
     await db.collection("users").doc(currentUser.uid).update({
-      blocked: firebase.firestore.FieldValue.arrayRemove(id)
+      blocked: firebase.firestore.FieldValue.arrayRemove(id),
+      [`blockedAt.${id}`]: firebase.firestore.FieldValue.delete()
     });
     currentUser.blocked = currentUser.blocked.filter(x=>x!==id);
+    if(currentUser.blockedAt) delete currentUser.blockedAt[id];
     renderBlockedList();
     updateBlockBanner();
+    if(activeChatPeer && activeChatPeer.id === id) refreshPeerUI(id, peerCache[id] || activeChatPeer);
     toast("تم إلغاء الحظر");
   }catch(err){ console.error(err); toast("حصل خطأ", true); }
 }
