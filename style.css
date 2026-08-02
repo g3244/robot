@@ -287,6 +287,9 @@ input,textarea{font-family:inherit;}
   display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--ink-dim); overflow:hidden;
 }
 .avatar-preview img{width:100%; height:100%; object-fit:cover;}
+/* الحرف الافتراضي جوه دايرة الصورة كان نازل شوية لتحت بسبب ارتفاع السطر
+   الافتراضي؛ بنظبطه في النص بالظبط. */
+.avatar-preview span{line-height:1; display:inline-block; transform:translateY(-1px);}
 .avatar-upload-btn{
   font-size:12.5px; color:var(--chat-accent); background:var(--accent-soft); padding:6px 14px;
   border-radius:999px; cursor:pointer; border:1px solid var(--accent-soft);
@@ -379,6 +382,7 @@ input,textarea{font-family:inherit;}
 }
 .avatar img{width:100%; height:100%; object-fit:cover;}
 .avatar.sm{width:40px; height:40px; font-size:14px;}
+.avatar span{line-height:1; display:inline-block; transform:translateY(-1px);}
 
 .icon-btn{
   width:36px; height:36px; border-radius:10px; background:var(--input-bg); border:1px solid var(--card-border);
@@ -585,6 +589,8 @@ input,textarea{font-family:inherit;}
 }
 .msg-reply-quote strong{font-size:11.5px; color:var(--chat-accent); display:block; font-weight:700;}
 .msg-reply-quote span{font-size:12.5px; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block;}
+.msg-reply-poll-icon{display:inline-flex; width:12px; height:12px; margin-inline-end:4px; color:var(--chat-accent); vertical-align:-1px;}
+.msg-reply-poll-icon svg{width:100%; height:100%;}
 
 /* small floating icon shown while swiping a message on touch devices */
 .swipe-reply-icon{
@@ -797,6 +803,7 @@ input,textarea{font-family:inherit;}
 }
 .attach-menu-icon-image{background:linear-gradient(135deg,#a855f7,#6366f1);}
 .attach-menu-icon-file{background:linear-gradient(135deg,#0ea5e9,#0369a1);}
+.attach-menu-icon-poll{background:linear-gradient(135deg,#22c55e,#15803d);}
 
 /* ---- image message bubble ----
    Three visual states, toggled via [data-state] on .msg-image:
@@ -1050,12 +1057,12 @@ input,textarea{font-family:inherit;}
 .privacy-opt.active{border-color:var(--chat-accent); background:var(--accent-soft); color:var(--chat-accent);}
 
 /* ---- read-receipts-style toggle row (WhatsApp-like) ---- */
-.settings-toggle-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px;}
+.settings-toggle-row{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px;}
 .settings-toggle-text{flex:1; min-width:0;}
 .settings-toggle-text h3{margin:0 0 4px;}
 .settings-toggle-text .hint-text{margin:0;}
 
-.toggle-switch{position:relative; display:inline-block; width:50px; height:29px; flex-shrink:0; cursor:pointer; margin-top:2px;}
+.toggle-switch{position:relative; display:inline-block; width:50px; height:29px; flex-shrink:0; cursor:pointer;}
 .toggle-switch input{position:absolute; opacity:0; width:0; height:0; margin:0;}
 .toggle-slider{
   position:absolute; inset:0; background:var(--input-bg); border:1.5px solid var(--card-border);
@@ -1163,6 +1170,126 @@ input,textarea{font-family:inherit;}
 .friends-top h2{font-size:18px; margin:0;}
 .friends-body{flex:1; overflow-y:auto; padding:16px 20px 24px;}
 
+/* =====================================================================
+   Poll creation page (clip menu → "استطلاع رأي"). Same slide-in-panel
+   shell as the friends list (full width on phone, fixed width on
+   desktop), just with a form body instead of a contact list.
+   ===================================================================== */
+.poll-overlay{
+  position:fixed; inset:0; z-index:65; background:rgba(6,9,16,.5); backdrop-filter:blur(4px);
+  display:flex; justify-content:flex-end; transition:opacity .25s;
+}
+.poll-overlay.hidden{opacity:0; pointer-events:none;}
+.poll-panel{
+  width:420px; max-width:92vw; height:100%; background:var(--bg, #000); border-right:1px solid var(--card-border);
+  display:flex; flex-direction:column; box-shadow:var(--shadow); animation: panelIn .3s cubic-bezier(.2,.8,.2,1);
+  position:relative;
+}
+.poll-top{display:flex; align-items:center; gap:14px; padding:18px 20px; border-bottom:1px solid var(--card-border);}
+.poll-top h2{font-size:18px; margin:0;}
+.poll-body{flex:1; overflow-y:auto; padding:20px 20px 100px;}
+.poll-section-label{font-size:13px; color:var(--ink-muted); margin:0 0 10px; text-align:right;}
+.poll-question-field{margin-bottom:22px;}
+.poll-options-list{display:flex; flex-direction:column; gap:10px; margin-bottom:22px;}
+.poll-option-input-row{
+  display:flex; align-items:center; gap:8px; width:100%; background:var(--input-bg);
+  border:1.5px solid var(--card-border); border-radius:10px; padding:11px 12px; transition:.2s;
+}
+.poll-option-input-row:focus-within{border-color:var(--chat-accent); background:var(--accent-soft);}
+.poll-option-input-row input{
+  flex:1; min-width:0; background:none; border:none; outline:none; color:var(--ink);
+  font-size:14.5px; text-align:right; font-family:inherit;
+}
+.poll-option-input-row input::placeholder{color:var(--ink-muted);}
+.poll-option-handle{
+  display:none; align-items:center; justify-content:center; flex-shrink:0;
+  width:18px; height:18px; color:var(--ink-muted);
+}
+.poll-option-input-row.has-text .poll-option-handle{display:flex;}
+.poll-toggle-row{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  font-size:14.5px; font-weight:600; padding-top:6px; border-top:1px solid var(--card-border);
+}
+.poll-send-btn{
+  position:absolute; left:20px; bottom:20px; width:56px; height:56px; border-radius:50%;
+  background:var(--chat-accent); color:var(--chat-accent-ink); border:none; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 10px 24px -8px rgba(0,0,0,.5); cursor:pointer; transition:.15s;
+}
+.poll-send-btn svg{transform:scaleX(-1);}
+.poll-send-btn:hover{filter:brightness(1.08);}
+.poll-send-btn:disabled{opacity:.4; cursor:not-allowed; filter:none;}
+@media (max-width:768px){ .poll-panel{width:100%; max-width:100%;} }
+
+/* =====================================================================
+   Poll message bubble — question, subtitle, options ranked by votes.
+   Each option shows: a small voter avatar (last person who picked it),
+   the option text, a check/hollow circle for my own vote, a fill bar
+   sized to that option's share of the votes, and the vote count. The
+   bar's shade is picked by *rank* (1st place brightest) so the leading
+   option always reads as the leading option at a glance.
+   ===================================================================== */
+.msg-poll{min-width:230px; max-width:100%;}
+.poll-msg-question{display:block; font-weight:700; font-size:15px; margin-bottom:2px;}
+.poll-msg-subtitle{display:block; font-size:12px; color:var(--ink-muted); margin-bottom:12px;}
+.poll-option{
+  position:relative; display:flex; flex-direction:column; gap:6px; margin-bottom:10px;
+  cursor:pointer; user-select:none;
+}
+.poll-option-top{display:flex; align-items:center; gap:8px;}
+.poll-option-avatar{
+  width:22px; height:22px; border-radius:50%; overflow:hidden; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; background:var(--chat-accent);
+  color:var(--chat-accent-ink); font-size:11px; font-weight:700;
+}
+.poll-option-avatar img{width:100%; height:100%; object-fit:cover;}
+.poll-option-text{flex:1; min-width:0; font-size:14px; word-break:break-word;}
+.poll-option-check{
+  width:20px; height:20px; border-radius:50%; border:1.5px solid currentColor; opacity:.55;
+  flex-shrink:0; display:flex; align-items:center; justify-content:center;
+}
+.poll-option.voted .poll-option-check{background:var(--chat-accent); border-color:var(--chat-accent); opacity:1; color:var(--chat-accent-ink);}
+.poll-option-check svg{width:12px; height:12px; opacity:0;}
+.poll-option.voted .poll-option-check svg{opacity:1;}
+.poll-option-bar-track{width:100%; height:5px; border-radius:3px; background:color-mix(in srgb, var(--chat-accent) 18%, transparent); overflow:hidden;}
+.poll-option-bar-fill{height:100%; border-radius:3px; width:0%; transition:width .3s ease; background:var(--chat-accent);}
+.poll-option-bar-fill.rank-1{opacity:.75;}
+.poll-option-bar-fill.rank-2{opacity:.55;}
+.poll-option-bar-fill.rank-3plus{opacity:.4;}
+.poll-option-count{font-size:11.5px; color:var(--ink-muted);}
+.poll-show-votes{
+  display:block; width:100%; text-align:center; background:none; border:none; border-top:1px solid rgba(255,255,255,.12);
+  color:var(--ink-muted); font-size:13px; font-weight:600; padding-top:10px; margin-top:2px; cursor:pointer; font-family:inherit;
+  transition:color .15s ease;
+}
+.poll-show-votes:not(:disabled){color:var(--chat-accent);}
+.poll-show-votes:disabled{cursor:not-allowed;}
+/* ---- Poll voters full page — same slide-in shell as poll creation
+   (.poll-overlay/.poll-panel/.poll-top), just with a read-only list
+   body instead of a form. Grouped by option, each voter shown as an
+   avatar + name row, divided by thin lines like a settings list. ---- */
+.pv-body{padding:0 0 24px;}
+.pv-group{margin-bottom:0;}
+.pv-group-title{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  min-height:44px; padding:0 20px; font-size:13.5px; font-weight:700; color:var(--ink);
+  border-top:1px solid var(--card-border);
+}
+.pv-group-title:last-child{border-bottom:1px solid var(--card-border);}
+.pv-group-title .pv-count{font-weight:500; font-size:12px; color:var(--ink-muted);}
+.pv-row{
+  display:flex; align-items:center; gap:12px; padding:10px 20px;
+  border-top:1px solid var(--card-border);
+}
+.pv-avatar{
+  width:40px; height:40px; border-radius:50%; overflow:hidden; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; background:var(--chat-accent);
+  color:var(--chat-accent-ink); font-size:15px; font-weight:700;
+}
+.pv-avatar img{width:100%; height:100%; object-fit:cover;}
+.pv-meta{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:right;}
+.pv-name{font-size:14.5px; font-weight:600; color:var(--ink); word-break:break-word;}
+.pv-time{font-size:12px; color:var(--ink-muted);}
+
 /* ---- "New contact" row, pinned above the saved-contacts list ---- */
 .add-contact-row{
   display:flex; align-items:center; gap:12px; width:100%; margin-bottom:14px; padding:10px 12px; border-radius:14px;
@@ -1176,6 +1303,19 @@ input,textarea{font-family:inherit;}
   display:flex; align-items:center; justify-content:center; color:var(--chat-accent-ink);
 }
 .add-contact-label{font-size:14.5px; font-weight:700;}
+/* Shared by the New Contact and New Group rows: each icon is really
+   two small separate SVGs (a plus + the glyph) placed side by side
+   with a small gap, instead of one drawing with the plus baked in. */
+.icon-plus-split{gap:2px;}
+/* تعديل خاص بزرار "جهة اتصال جديدة" بس: بيقرّب العلامة (+) من أيقونة
+   الشخص. مقفول على #openAddContactBtn عشان زرار #newGroupBtn (اللي
+   بيستخدم نفس كلاس .icon-plus-split) يفضل زي ما هو من غير أي تأثير. */
+#openAddContactBtn .icon-plus-split{gap:0;}
+#openAddContactBtn .icon-plus-split svg:first-child{margin-inline-end:-6px;}
+/* زرار "إضافة" في بيانات المجموعة: نفس مسافة علامة الزائد المستخدمة في
+   زرار "جهة اتصال جديدة" بالظبط. */
+.ngd-add-icon.icon-plus-split{gap:0;}
+.ngd-add-icon.icon-plus-split svg:first-child{margin-inline-end:-6px;}
 
 .friends-list{display:flex; flex-direction:column; gap:6px;}
 .friend-item{display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:14px; cursor:pointer; transition:.15s; min-width:0;}
@@ -1184,6 +1324,60 @@ input,textarea{font-family:inherit;}
 .friend-item .fi-info{flex:1; min-width:0; max-width:100%; overflow:hidden; display:flex; flex-direction:column; justify-content:center;}
 .friend-item .fi-info strong{display:block; min-width:0; max-width:100%; font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700;}
 .friend-item .fi-info span{display:block; min-width:0; max-width:100%; font-size:11.5px; color:var(--ink-dim); font-family:var(--font-mono); direction:ltr; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+/* ---- New Group member picker — same .friends-overlay/.friends-panel
+   shell as the Friends page, just with a search bar in the header
+   instead of a title, a selection circle on each row, and a floating
+   arrow FAB in the corner. ---- */
+.ngp-top{display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--card-border);}
+.ngp-search-wrap{flex:1; min-width:0;}
+.ngp-search-wrap input{
+  width:100%; background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:20px;
+  padding:9px 16px; font-size:14.5px; color:var(--ink); font-family:inherit; text-align:right; outline:none; transition:border-color .15s;
+}
+.ngp-search-wrap input:focus{border-color:var(--chat-accent);}
+.ngp-search-wrap input::placeholder{color:var(--ink-muted);}
+.ngp-body{position:relative; padding-bottom:80px;}
+.friend-item.ngp-item{cursor:pointer;}
+.ngp-check{
+  flex-shrink:0; width:24px; height:24px; border-radius:50%; border:2px solid var(--card-border);
+  display:flex; align-items:center; justify-content:center; color:#fff; transition:.15s; background:transparent;
+}
+.ngp-check svg{opacity:0; transform:scale(.5); transition:.15s;}
+.friend-item.ngp-item.selected .ngp-check{background:var(--chat-accent); border-color:var(--chat-accent);}
+.friend-item.ngp-item.selected .ngp-check svg{opacity:1; transform:scale(1);}
+.ngp-fab{
+  position:absolute; left:20px; bottom:20px; width:52px; height:52px; border-radius:50%;
+  background:var(--chat-accent); color:var(--chat-accent-ink); border:none; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow); transition:.2s;
+}
+/* علامة الصح في زرار "تم" (آخر زرار في بيانات المجموعة) شكلها ميال لفوق
+   شوية بسبب شكل الرسمة نفسها، فبنزّلها بكسل واحد عشان تظبط في النص بالظبط. */
+#ngdDoneBtn svg{transform:translateY(1px);}
+
+/* ---- Group details page (photo/name/permissions/members), reached
+   from the picker's arrow FAB — reuses .friends-overlay/.ngp-panel/
+   .ngp-body, just adds its own header title, a chevron on the
+   permissions row, the member-count line, and the round "إضافة"
+   button. ---- */
+.ngd-title{font-size:17px; margin:0; font-weight:700;}
+.ngd-body{padding-top:20px;}
+.ngd-perm-row{margin-bottom:18px; position:relative;}
+.ngd-chevron{flex-shrink:0; color:var(--ink-dim); transform:scaleX(-1); margin-inline-start:auto;}
+.ngd-members-line{
+  display:flex; align-items:center; justify-content:space-between;
+  font-size:13.5px; color:var(--ink-muted); margin-bottom:12px; padding:0 2px;
+}
+.ngd-members-line span:first-child{font-weight:700; color:var(--ink);}
+.ngd-add-btn{
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  background:none; border:none; cursor:pointer; color:var(--ink); font-size:12.5px; font-family:inherit;
+}
+.ngd-add-icon{
+  width:48px; height:48px; border-radius:50%; background:var(--chat-accent); color:var(--chat-accent-ink);
+  display:flex; align-items:center; justify-content:center; transition:.15s;
+}
+.ngd-add-btn:hover .ngd-add-icon{filter:brightness(1.08);}
 
 /* ---- Wasla AI entry point, pinned under the friends list ---- */
 .ai-friend-btn{
@@ -1329,12 +1523,13 @@ input,textarea{font-family:inherit;}
 }
 
 /* scrollbars */
-.chat-list::-webkit-scrollbar, .messages::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .composer-pill textarea::-webkit-scrollbar, .emoji-panel-body::-webkit-scrollbar{width:6px;}
-.chat-list::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .composer-pill textarea::-webkit-scrollbar-thumb, .emoji-panel-body::-webkit-scrollbar-thumb{background:var(--scrollbar); border-radius:6px;}
-.chat-list::-webkit-scrollbar-track, .messages::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .composer-pill textarea::-webkit-scrollbar-track, .emoji-panel-body::-webkit-scrollbar-track{background:transparent;}
+.chat-list::-webkit-scrollbar, .messages::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .composer-pill textarea::-webkit-scrollbar, .emoji-panel-body::-webkit-scrollbar, .poll-body::-webkit-scrollbar::-webkit-scrollbar, .friends-body::-webkit-scrollbar{width:6px;}
+.chat-list::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .composer-pill textarea::-webkit-scrollbar-thumb, .emoji-panel-body::-webkit-scrollbar-thumb, .poll-body::-webkit-scrollbar-thumb::-webkit-scrollbar-thumb, .friends-body::-webkit-scrollbar-thumb{background:var(--scrollbar); border-radius:6px;}
+.chat-list::-webkit-scrollbar-track, .messages::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .composer-pill textarea::-webkit-scrollbar-track, .emoji-panel-body::-webkit-scrollbar-track, .poll-body::-webkit-scrollbar-track::-webkit-scrollbar-track, .friends-body::-webkit-scrollbar-track{background:transparent;}
 /* just the thumb, no up/down arrow buttons at the ends */
-.chat-list::-webkit-scrollbar-button, .messages::-webkit-scrollbar-button, .settings-body::-webkit-scrollbar-button, .composer-pill textarea::-webkit-scrollbar-button, .emoji-panel-body::-webkit-scrollbar-button{display:none; width:0; height:0;}
-.chat-list, .messages, .settings-body, .composer-pill textarea, .emoji-panel-body{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+.chat-list::-webkit-scrollbar-button, .messages::-webkit-scrollbar-button, .settings-body::-webkit-scrollbar-button, .composer-pill textarea::-webkit-scrollbar-button, .emoji-panel-body::-webkit-scrollbar-button, .poll-body::-webkit-scrollbar-button::-webkit-scrollbar-button, .friends-body::-webkit-scrollbar-button{display:none; width:0; height:0;}
+.chat-list, .messages, .settings-body, .composer-pill textarea, .emoji-panel-body, .poll-body, .friends-body{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+
 
 /* settings tabs: keep scrollable (swipe/wheel still works), just hide the scrollbar itself */
 .settings-tabs::-webkit-scrollbar{width:0; height:0; display:none;}

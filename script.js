@@ -183,6 +183,23 @@ function genId(){
 
 function chatIdFor(a,b){ return [a,b].sort().join("_"); }
 
+/* ---- group-aware helpers, used everywhere a message gets sent so the
+   same send code works whether activeChatPeer is a real 1:1 peer (id +
+   uid) or a synthetic group peer ({isGroup:true, id:<chat doc id>,
+   members:[...all participant ids incl. me]}). ---- */
+function chatParticipantsFor(peer){
+  return peer.isGroup ? peer.members.slice() : [currentUser.id, peer.id];
+}
+function otherMembersUnreadIncrement(peer){
+  const others = peer.isGroup ? peer.members.filter(id=> id!==currentUser.id) : [peer.id];
+  const obj = {};
+  others.forEach(id=>{ obj[id] = firebase.firestore.FieldValue.increment(1); });
+  return obj;
+}
+function deletedForRemoveIds(peer){
+  return peer.isGroup ? peer.members.slice() : [currentUser.id, peer.id];
+}
+
 /* ---- unsent-composer drafts (WhatsApp-style "Draft: ..." in the chat
    list) — purely local, per device, keyed by chat id, never touches
    Firestore since it's nobody's business but mine ---- */
@@ -873,6 +890,7 @@ async function logout(){
     stopPresenceTracking();
     if(chatListUnsub){ chatListUnsub(); chatListUnsub = null; }
     if(msgUnsub){ msgUnsub(); msgUnsub = null; }
+    if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
     unwatchAllPeers();
     if(auth) await auth.signOut();
   }catch(e){ console.error(e); }
@@ -1248,8 +1266,8 @@ async function renderChatList(rawDocs){
 
   const docs = visibleDocs.slice().sort((a,b)=>{
     const aData = a.data(), bData = b.data();
-    const aPeerId = aData.participants.find(p=>p!==currentUser.id);
-    const bPeerId = bData.participants.find(p=>p!==currentUser.id);
+    const aPeerId = aData.type === "group" ? a.id : aData.participants.find(p=>p!==currentUser.id);
+    const bPeerId = bData.type === "group" ? b.id : bData.participants.find(p=>p!==currentUser.id);
     const aPinned = pinnedIds.includes(aPeerId);
     const bPinned = pinnedIds.includes(bPeerId);
     if(aPinned !== bPinned) return aPinned ? -1 : 1;
@@ -1263,18 +1281,25 @@ async function renderChatList(rawDocs){
   const seenPeerIds = [];
   for(const doc of docs){
     const data = doc.data();
-    const peerId = data.participants.find(p=>p!==currentUser.id);
+    const isGroup = data.type === "group";
+    const peerId = isGroup ? doc.id : data.participants.find(p=>p!==currentUser.id);
     if(!peerId) continue;
     seenPeerIds.push(peerId);
-    let peer = peerCache[peerId];
-    if(!peer || !peer.uid){
-      const s = await db.collection("users").where("id","==",peerId).limit(1).get();
-      peer = s.empty ? {id:peerId, name:"مستخدم", photoURL:""} : { ...s.docs[0].data(), uid: s.docs[0].id };
+    let peer;
+    if(isGroup){
+      peer = { id: doc.id, isGroup:true, name: data.groupName || "مجموعة", photoURL: data.groupPhotoURL || "", members: data.participants.slice() };
       peerCache[peerId] = peer;
+    } else {
+      peer = peerCache[peerId];
+      if(!peer || !peer.uid){
+        const s = await db.collection("users").where("id","==",peerId).limit(1).get();
+        peer = s.empty ? {id:peerId, name:"مستخدم", photoURL:""} : { ...s.docs[0].data(), uid: s.docs[0].id };
+        peerCache[peerId] = peer;
+      }
     }
     const unread = (data.unreadCounts && data.unreadCounts[currentUser.id]) || 0;
     const isOpenRightNow = activeChatPeer && activeChatPeer.id === peerId;
-    const draftText = isOpenRightNow ? "" : getDraftText(chatIdFor(currentUser.id, peerId));
+    const draftText = isOpenRightNow ? "" : getDraftText(isGroup ? peerId : chatIdFor(currentUser.id, peerId));
     const previewSource = (isOpenRightNow && frozenChatListPreview && frozenChatListPreview.peerId === peerId)
       ? frozenChatListPreview
       : data;
@@ -1331,7 +1356,8 @@ async function renderChatList(rawDocs){
        and have received this chat's data — that's the moment a
        "sent" message from the peer counts as "delivered" (single
        check -> double gray check), same idea as a real chat app. */
-    markMessagesDeliveredForChat(doc.id, peerId, data);
+    if(isGroup) markGroupLastMessageDelivered(doc.id, peer, data);
+    else markMessagesDeliveredForChat(doc.id, peerId, data);
   }
   visibleChatPeerIds = seenPeerIds.slice();
   if(!$("#friendsOverlay").classList.contains("hidden")) renderFriendsPage();
@@ -1400,6 +1426,7 @@ function resolveDisplayName(peerId, rawName){
    their own profile name. */
 function chatListDisplayName(peer){
   if(!peer) return "";
+  if(peer.isGroup) return peer.name || "مجموعة";
   if(peer.id === AI_PEER_ID) return peer.name;
   const entry = findSavedContact(peer.id);
   if(!entry) return peer.id;
@@ -1414,6 +1441,7 @@ function chatListDisplayName(peer){
    peer genuinely has no account at all. */
 function peerDisplayName(peer){
   if(!peer) return "";
+  if(peer.isGroup) return peer.name || "مجموعة";
   if(!peer.uid) return peer.id;
   return resolveDisplayName(peer.id, peer.name);
 }
@@ -1634,6 +1662,229 @@ $("#friendsOverlay").addEventListener("click", e=>{
 });
 
 /* =====================================================================
+   5.3.1) NEW GROUP — member picker page
+   Opened from the "مجموعة جديدة" row on the Friends page. Only shows
+   saved friends (same source as the Friends page), with a search box
+   and a selection circle per row. The floating arrow FAB is a
+   placeholder for a future "name the group" step that doesn't exist
+   yet — it shows up once at least one person is picked, but is
+   intentionally wired to do nothing when tapped.
+   ===================================================================== */
+const ngpSelected = new Set();
+function ngpFriendItemHTML(){
+  return `<span class="ngp-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>`;
+}
+function buildNgpItem(peer, entry){
+  const item = document.createElement("div");
+  item.className = "friend-item ngp-item";
+  const isRegistered = !!peer.uid;
+  const displayName = [entry && entry.alias ? entry.alias : peer.name, entry && entry.familyName].filter(Boolean).join(" ");
+  const shownText = isRegistered ? displayName : peer.id;
+  item.dataset.searchText = shownText.toLowerCase();
+  item.dataset.peerId = peer.id;
+  item.innerHTML = `
+    <div class="avatar sm" id="ngp-${peer.id}"><span></span><img class="hidden"></div>
+    <div class="fi-info"><strong>${escapeHtml(shownText)}</strong></div>
+    ${ngpFriendItemHTML()}`;
+  setAvatarNode(item.querySelector(`#ngp-${peer.id}`), peer.name, peer.photoURL);
+  // Reflect any selection made in a previous visit to this list (e.g.
+  // coming back via "إضافة" from the group-details page), instead of
+  // always starting unchecked.
+  if(ngpSelected.has(peer.id)) item.classList.add("selected");
+  item.addEventListener("click", ()=>{
+    if(ngpSelected.has(peer.id)){ ngpSelected.delete(peer.id); item.classList.remove("selected"); }
+    else { ngpSelected.add(peer.id); item.classList.add("selected"); }
+    renderNgdMembersLine();
+  });
+  return item;
+}
+async function renderNgpList(){
+  const saved = Array.isArray(currentUser.savedContacts) ? currentUser.savedContacts : [];
+  const list = $("#ngpFriendsList");
+  list.innerHTML = "";
+  $("#ngpEmpty").classList.toggle("hidden", saved.length > 0);
+  for(const entry of saved){
+    list.appendChild(buildNgpItem(await lookupUserById(entry.id), entry));
+  }
+}
+/* Where the picker's own top-left arrow should go when pressed —
+   'close' fully exits the whole group-creation flow, 'details' returns
+   to the group-details page. */
+let ngpBackTarget = "close";
+function openNgpPicker(backTarget){
+  ngpBackTarget = backTarget;
+  $("#ngpSearchInput").value = "";
+  $("#newGroupPickerOverlay").classList.remove("hidden");
+  renderNgpList();
+}
+/* Opened from the "مجموعة جديدة" row on the Friends page — a genuinely
+   fresh start, so both the member selection and the details form (name/
+   photo/permissions) get cleared. Its top arrow fully closes the flow. */
+function openNewGroupPicker(){
+  ngpSelected.clear();
+  ngdState = { photo:null, name:"", permSend:"all", permEdit:"admins", groupId:null, autoGenerateId:true, joinApproval:false };
+  openNgpPicker("close");
+}
+/* Reopens the same picker to add more members from the "إضافة" button
+   (or the back arrow) on the details page — everything already picked
+   or filled in stays exactly as it was. Its top arrow returns to the
+   details page instead of closing the whole flow. */
+function openNgpToAddMore(){
+  openNgpPicker("details");
+}
+/* Reopens the picker while leaving ngpSelected/ngdState untouched, but
+   with its own back arrow set to fully exit the flow rather than
+   looping back to whichever screen sent it here. Used by both the
+   details page's back arrow and the permissions page's back arrow. */
+function openNgpFromPermissions(){
+  openNgpPicker("close");
+}
+function closeNewGroupPicker(){
+  $("#newGroupPickerOverlay").classList.add("hidden");
+}
+$("#newGroupBtn").addEventListener("click", openNewGroupPicker);
+$("#closeNewGroupPickerBtn").addEventListener("click", ()=>{
+  closeNewGroupPicker();
+  if(ngpBackTarget === "details") openNewGroupDetails();
+});
+$("#ngpSearchInput").addEventListener("input", e=>{
+  const q = e.target.value.trim().toLowerCase();
+  $("#ngpFriendsList").querySelectorAll(".ngp-item").forEach(node=>{
+    node.classList.toggle("hidden", q && !node.dataset.searchText.includes(q));
+  });
+});
+$("#ngpNextBtn").addEventListener("click", ()=>{
+  if(ngpSelected.size === 0){ toast("اختار عضو واحد على الأقل", true); return; }
+  closeNewGroupPicker();
+  openNewGroupDetails();
+});
+
+/* =====================================================================
+   5.3.2) NEW GROUP — details page (photo / name / permissions / members)
+   Opened once at least one member is picked and the arrow FAB is
+   tapped. ngdState holds the photo/name/permissions locally; the
+   member set itself just stays in ngpSelected so this page and the
+   picker always agree on who's in. "تم" creates the real chats/ doc
+   (type:"group", participants = everyone + me) and opens straight into
+   it — every added member sees the group the moment their own chat
+   list listener picks up the new doc (same array-contains query used
+   for 1:1 chats). ===================================================================== */
+let ngdState = { photo:null, name:"", permSend:"all", permEdit:"admins", groupId:null, autoGenerateId:true, joinApproval:false };
+
+function renderNgdMembersLine(){
+  const count = ngpSelected.size;
+  $("#ngdMembersCount").textContent = count === 0 ? "مفيش حد" : (count === 1 ? "عضو واحد" : `${count} أعضاء`);
+}
+function openNewGroupDetails(){
+  $("#newGroupDetailsOverlay").classList.remove("hidden");
+  $("#ngdNameInput").value = ngdState.name;
+  setAvatarNode($("#ngdAvatarPreview"), ngdState.name || "مجموعة", ngdState.photo);
+  renderNgdMembersLine();
+}
+function closeNewGroupDetails(){
+  $("#newGroupDetailsOverlay").classList.add("hidden");
+}
+$("#ngdNameInput").addEventListener("input", e=>{ ngdState.name = e.target.value; });
+$("#ngdPhotoInput").addEventListener("change", async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  ngdState.photo = await resizeImageFile(file);
+  setAvatarNode($("#ngdAvatarPreview"), ngdState.name || "مجموعة", ngdState.photo);
+});
+// Back arrow and "إضافة" both go back to the member picker without
+// touching anything already entered here.
+// The top-left arrow on the details page goes back to the member
+// picker (the same one reached right after "مجموعة جديدة") — using the
+// exit-on-back variant, so THAT screen's own back arrow fully leaves
+// the flow instead of bouncing back to the details page again.
+$("#ngdBackBtn").addEventListener("click", ()=>{ closeNewGroupDetails(); openNgpFromPermissions(); });
+$("#ngdAddMembersBtn").addEventListener("click", ()=>{ closeNewGroupDetails(); openNgpToAddMore(); });
+$("#ngdDoneBtn").addEventListener("click", async ()=>{
+  const name = $("#ngdNameInput").value.trim();
+  if(!name){ toast("اكتب اسم للمجموعة الأول", true); return; }
+  if(ngpSelected.size === 0){ toast("اختار عضو واحد على الأقل", true); return; }
+  // الايدي بيتولّد هنا بس، لحظة إنشاء المجموعة فعليًا — مش قبل كده.
+  if(ngdState.autoGenerateId){ ngdState.groupId = genId(); }
+  const doneBtn = $("#ngdDoneBtn");
+  if(doneBtn.disabled) return; // guard against a double-tap firing this twice
+  doneBtn.disabled = true;
+  const memberIds = Array.from(ngpSelected);
+  const participants = [currentUser.id, ...memberIds];
+  try{
+    const chatRef = db.collection("chats").doc();
+    await chatRef.set({
+      type: "group",
+      participants,
+      admins: [currentUser.id],
+      groupName: name,
+      groupPhotoURL: ngdState.photo || "",
+      permSend: ngdState.permSend,
+      permEdit: ngdState.permEdit,
+      groupId: ngdState.groupId || null,
+      joinApproval: !!ngdState.joinApproval,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      unreadCounts: participants.reduce((acc,id)=>{ acc[id]=0; return acc; }, {})
+    });
+    const groupPeer = { id: chatRef.id, isGroup:true, name, photoURL: ngdState.photo || "", members: participants };
+    toast(ngdState.groupId ? `تم إنشاء مجموعة "${name}" — ايديها: ${ngdState.groupId}` : `تم إنشاء مجموعة "${name}"`);
+    closeNewGroupDetails();
+    closeFriendsPage();
+    ngpSelected.clear();
+    ngdState = { photo:null, name:"", permSend:"all", permEdit:"admins", groupId:null, autoGenerateId:true, joinApproval:false };
+    await openChat(groupPeer);
+  }catch(err){
+    console.error(err);
+    toast("حصل خطأ وانت بتعمل المجموعة، جرب تاني", true);
+  }finally{
+    doneBtn.disabled = false;
+  }
+});
+
+/* -- group permissions sub-page -- */
+function renderNgdPermissionsUI(){
+  $$(".privacy-opt", $("#ngdSendPermGroup")).forEach(b=>{
+    b.classList.toggle("active", b.dataset.permSend === ngdState.permSend);
+  });
+  $$(".privacy-opt", $("#ngdEditPermGroup")).forEach(b=>{
+    b.classList.toggle("active", b.dataset.permEdit === ngdState.permEdit);
+  });
+  $("#ngdGroupIdChip").classList.toggle("hidden", !ngdState.groupId);
+  $("#ngdGroupIdText").textContent = ngdState.groupId || "—";
+  $("#ngdAutoIdToggle").checked = !!ngdState.autoGenerateId;
+  $("#ngdJoinApprovalToggle").checked = !!ngdState.joinApproval;
+}
+function openNgdPermissions(){
+  closeNewGroupDetails();
+  $("#ngdPermissionsOverlay").classList.remove("hidden");
+  renderNgdPermissionsUI();
+}
+function closeNgdPermissions(){
+  $("#ngdPermissionsOverlay").classList.add("hidden");
+  openNewGroupDetails();
+}
+$("#ngdPermissionsBtn").addEventListener("click", openNgdPermissions);
+$("#ngdPermissionsBackBtn").addEventListener("click", closeNgdPermissions);
+$$(".privacy-opt", $("#ngdSendPermGroup")).forEach(btn=>{
+  btn.addEventListener("click", ()=>{ ngdState.permSend = btn.dataset.permSend; renderNgdPermissionsUI(); });
+});
+$$(".privacy-opt", $("#ngdEditPermGroup")).forEach(btn=>{
+  btn.addEventListener("click", ()=>{ ngdState.permEdit = btn.dataset.permEdit; renderNgdPermissionsUI(); });
+});
+// تشيك بوكس عادي زي باقي إعدادات الجروب، مفعّل دايمًا افتراضيًا مع كل
+// جروب جديد، وممكن بس تقفله. التوليد الفعلي بيحصل لحظة إنشاء المجموعة
+// في #ngdDoneBtn، مش هنا.
+$("#ngdAutoIdToggle").addEventListener("change", e=>{
+  ngdState.autoGenerateId = e.target.checked;
+});
+$("#ngdCopyGroupIdBtn").addEventListener("click", ()=>{
+  if(!ngdState.groupId) return;
+  copyText(ngdState.groupId).then(()=> toast("تم نسخ ايدي المجموعة")).catch(()=> toast("تعذر النسخ، انسخه يدويًا", true));
+});
+$("#ngdJoinApprovalToggle").addEventListener("change", e=>{
+  ngdState.joinApproval = e.target.checked;
+});
+
+/* =====================================================================
    5.5) REALTIME PEER WATCHING
    Keeps a live Firestore listener on every peer currently visible (chat
    list items + the open chat), so name/photo/bio stay in sync and so we
@@ -1647,6 +1898,26 @@ const peerBlockTimers = {}; // peerId -> pending setTimeout handle
 const peerBlockHidden = {}; // peerId -> true once photo should be hidden
 let peerProfileOpenId = null;
 
+/* Fetches every group member's profile once (skipping ones already in
+   peerCache / me) so the message list can look a sender up
+   synchronously while rendering, instead of firing a Firestore read
+   per bubble. */
+async function preloadGroupMembers(peer){
+  if(!peer || !peer.isGroup) return;
+  const missing = peer.members.filter(id=> id !== currentUser.id && !peerCache[id]);
+  if(!missing.length) return;
+  await Promise.all(missing.map(async id=>{
+    try{
+      const s = await db.collection("users").where("id","==",id).limit(1).get();
+      peerCache[id] = s.empty ? {id, name:"عضو", photoURL:""} : { ...s.docs[0].data(), uid: s.docs[0].id };
+    }catch(e){ console.error("group member fetch failed", e); peerCache[id] = {id, name:"عضو", photoURL:""}; }
+  }));
+}
+/* Small-avatar-next-to-message lookup for group chats. */
+function groupMemberInfo(senderId){
+  if(senderId === currentUser.id) return currentUser;
+  return peerCache[senderId] || {id: senderId, name:"عضو", photoURL:""};
+}
 function watchPeer(peer){
   if(!peer || !peer.id || !peer.uid || peerDocUnsubs[peer.id]) return;
   peerDocUnsubs[peer.id] = db.collection("users").doc(peer.uid).onSnapshot(snap=>{
@@ -1665,6 +1936,61 @@ function unwatchPeer(id){
 }
 function unwatchAllPeers(){
   Object.keys(peerDocUnsubs).forEach(unwatchPeer);
+}
+
+/* ---- Group "N online" count ----
+   Shown in the header's small status line (the same spot a 1-1 chat
+   uses for "last seen"/typing) while a group chat is open: counts
+   every member — me included — currently online, live. Only tracked
+   for the group that's actually open right now (watchGroupPresence /
+   unwatchGroupPresence below), same scoping as the messages listener
+   itself, since keeping a listener per member per group open all the
+   time regardless of what's on screen would be a lot of idle
+   subscriptions for very little benefit. */
+const groupPresenceUnsubs = {}; // groupId -> array of unsubscribe fns
+function groupOnlineCount(peer){
+  const others = peer.members.filter(id=> id !== currentUser.id);
+  const visibleOnline = others.filter(id=>{
+    const p = peerCache[id];
+    if(!p || !p.online) return false;
+    const privacy = p.lastSeenPrivacy || "everyone";
+    return privacy === "everyone" || (privacy === "contacts" && isSavedContact(id));
+  }).length;
+  return 1 + visibleOnline; // +1 for me — I'm obviously online right now
+}
+function updateGroupOnlineStatus(peer){
+  if(!activeChatPeer || activeChatPeer.id !== peer.id || !peer.isGroup) return;
+  const statusEl = $("#peerStatus");
+  const count = groupOnlineCount(peer);
+  /* just me online isn't worth announcing — the line only appears once
+     there's actually someone else to report */
+  if(count < 2){
+    statusEl.textContent = "";
+    statusEl.classList.add("hidden");
+    return;
+  }
+  statusEl.textContent = `المتصلين ${count}`;
+  statusEl.classList.remove("hidden");
+}
+function watchGroupPresence(peer){
+  unwatchGroupPresence(peer.id);
+  const unsubs = [];
+  peer.members.filter(id=> id !== currentUser.id).forEach(id=>{
+    const cached = peerCache[id];
+    if(!cached || !cached.uid) return;
+    const unsub = db.collection("users").doc(cached.uid).onSnapshot(snap=>{
+      if(!snap.exists) return;
+      peerCache[id] = { ...peerCache[id], ...snap.data(), id, uid: snap.id };
+      updateGroupOnlineStatus(peer);
+    }, err=> console.error("group presence watch error", err));
+    unsubs.push(unsub);
+  });
+  groupPresenceUnsubs[peer.id] = unsubs;
+}
+function unwatchGroupPresence(groupId){
+  const unsubs = groupPresenceUnsubs[groupId];
+  if(unsubs) unsubs.forEach(fn=> fn());
+  delete groupPresenceUnsubs[groupId];
 }
 
 /* Delays hiding the photo by ~3s after a block is detected, and restores
@@ -1746,7 +2072,7 @@ function refreshPeerUI(id, data){
 
 /* ---------------- peer profile modal ---------------- */
 $("#peerProfileTrigger").addEventListener("click", ()=>{
-  if(!activeChatPeer) return;
+  if(!activeChatPeer || activeChatPeer.isGroup) return;
   peerProfileOpenId = activeChatPeer.id;
   const data = peerCache[activeChatPeer.id] || activeChatPeer;
   refreshPeerUI(activeChatPeer.id, data);
@@ -1813,6 +2139,8 @@ const NO_ENTRY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const VOICE_PLAY_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>`;
 const VOICE_PAUSE_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
 const FILE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+const CHECK_SMALL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>`;
+const POLL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>`;
 const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
 const IMG_CLOSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 /* human-readable file size, e.g. 1536 -> "1.5 KB" */
@@ -1822,6 +2150,65 @@ function fmtFileSize(bytes){
   let i = 0, n = bytes;
   while(n >= 1024 && i < units.length - 1){ n /= 1024; i++; }
   return (i === 0 ? Math.round(n) : n.toFixed(1)) + " " + units[i];
+}
+
+/* =====================================================================
+   Poll message bubbles. A poll is a 1:1-chat-only feature here (there
+   are no groups), so a vote can only ever come from `currentUser` or
+   `activeChatPeer` — that's what makes it cheap to resolve a "last
+   voter" avatar per option without a separate voters sub-collection:
+   the whole thing lives on the message doc as
+     poll: { question, options:[{id,text}], allowMultiple, votes:{uid:[optionId,...]} }
+   `votes` keys are only ever added/updated for the two participants,
+   and object key order in a plain JS object is insertion order for
+   string keys — good enough to treat the last key touching an option
+   as "the last person who voted for it".
+   ===================================================================== */
+function pollVoterInfo(uid){
+  if(!uid) return null;
+  if(currentUser && uid === currentUser.id) return { name: currentUser.name, photoURL: currentUser.photoURL };
+  if(activeChatPeer && uid === activeChatPeer.id) return { name: peerDisplayName(activeChatPeer), photoURL: activeChatPeer.photoURL };
+  return null;
+}
+function pollAvatarHTML(uid){
+  const info = pollVoterInfo(uid);
+  if(!info) return "";
+  if(info.photoURL) return `<span class="poll-option-avatar"><img src="${escapeHtml(info.photoURL)}" alt=""></span>`;
+  return `<span class="poll-option-avatar">${escapeHtml(initials(info.name))}</span>`;
+}
+function pollBubbleHTML(m, docId){
+  const poll = m.poll || {};
+  const options = Array.isArray(poll.options) ? poll.options : [];
+  const votes = poll.votes || {};
+  const myVote = (currentUser && Array.isArray(votes[currentUser.id])) ? votes[currentUser.id] : [];
+  const perOption = options.map(opt=>{
+    const voterIds = Object.keys(votes).filter(uid=> Array.isArray(votes[uid]) && votes[uid].includes(opt.id));
+    return { opt, count: voterIds.length, lastVoter: voterIds[voterIds.length - 1] || null };
+  });
+  const totalVotes = perOption.reduce((sum, o)=> sum + o.count, 0);
+  const rankByCount = [...perOption].sort((a,b)=> b.count - a.count).map(o=> o.opt.id);
+  const subtitle = poll.allowMultiple ? "اختر عدة خيارات" : "حدد خيارًا واحدًا";
+  const optionsHtml = perOption.map(({opt, count, lastVoter})=>{
+    const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+    const rankIdx = rankByCount.indexOf(opt.id);
+    const rankClass = count === 0 ? "" : rankIdx === 0 ? "rank-1" : rankIdx === 1 ? "rank-2" : "rank-3plus";
+    const voted = myVote.includes(opt.id);
+    return `<div class="poll-option${voted ? " voted" : ""}" data-msgid="${escapeHtml(docId)}" data-option-id="${escapeHtml(opt.id)}">
+      <div class="poll-option-top">
+        ${count > 0 ? pollAvatarHTML(lastVoter) : ""}
+        <span class="poll-option-text">${escapeHtml(opt.text)}</span>
+        <span class="poll-option-check">${CHECK_SMALL_ICON}</span>
+      </div>
+      <div class="poll-option-bar-track"><div class="poll-option-bar-fill ${rankClass}" data-pct="${pct}" style="width:${pct}%"></div></div>
+      <span class="poll-option-count">${count} صوت</span>
+    </div>`;
+  }).join("");
+  return `<div class="msg-poll">
+    <span class="poll-msg-question">${escapeHtml(poll.question || "")}</span>
+    <span class="poll-msg-subtitle">${subtitle}</span>
+    ${optionsHtml}
+    <button type="button" class="poll-show-votes" data-msgid="${escapeHtml(docId)}"${totalVotes > 0 ? "" : " disabled"}>عرض الأصوات</button>
+  </div>`;
 }
 
 /* =====================================================================
@@ -2142,6 +2529,111 @@ async function markPeerMessagesRead(snapDocs, peerId){
   }
 }
 
+/* ---- Group read receipts ----
+   A 1-1 message only ever has one recipient, so a single "status"
+   string (sent/delivered/read) is enough. A group message has many
+   recipients, so each message additionally carries two arrays —
+   deliveredTo / readBy — one entry per member who has actually hit
+   that stage. "status" is then just the aggregate of those two arrays
+   against the group's member list, recomputed every time either array
+   changes, so all the existing tick-rendering code (bubbles AND the
+   chat-list preview, both of which just read m.status /
+   lastMessageStatus) keeps working completely unchanged:
+     - nobody delivered yet          -> "sent"    (single grey tick)
+     - everyone delivered, not all read -> "delivered" (double grey tick)
+     - everyone has read it          -> "read"    (double BLUE tick)
+   A member who has read receipts switched off is simply never added
+   to readBy (same privacy behaviour as 1-1 chats) — which means a
+   group containing that person can reach "delivered" but can never
+   reach "read": the ticks stay grey forever as a visible sign that at
+   least one person's read status can't be confirmed. */
+function groupReceiptPayload(peer){
+  return peer && peer.isGroup ? { deliveredTo: [], readBy: [] } : {};
+}
+function computeGroupMessageStatus(recipientIds, deliveredTo, readBy){
+  if(!recipientIds.length) return "sent";
+  const delivered = Array.isArray(deliveredTo) ? deliveredTo : [];
+  const read = Array.isArray(readBy) ? readBy : [];
+  if(recipientIds.every(id=> read.includes(id))) return "read";
+  if(recipientIds.every(id=> delivered.includes(id))) return "delivered";
+  return "sent";
+}
+
+/* Lightweight path: fires from the chat-list refresh (peer's group chat
+   isn't necessarily open), so — same cost trade-off as
+   markMessagesDeliveredForChat above — it only ever touches the LAST
+   message instead of scanning the whole history. */
+async function markGroupLastMessageDelivered(chatId, peer, chatData){
+  if(!chatData || !chatData.lastMessageSenderId || chatData.lastMessageSenderId === currentUser.id) return;
+  if(!chatData.lastMessageId) return;
+  if(chatData.lastMessageStatus === "read") return;
+  const delivered = Array.isArray(chatData.lastMessageDeliveredTo) ? chatData.lastMessageDeliveredTo : [];
+  if(delivered.includes(currentUser.id)) return;
+  try{
+    const newDelivered = [...delivered, currentUser.id];
+    const recipientIds = peer.members.filter(id=> id !== chatData.lastMessageSenderId);
+    const readBy = Array.isArray(chatData.lastMessageReadBy) ? chatData.lastMessageReadBy : [];
+    const newStatus = computeGroupMessageStatus(recipientIds, newDelivered, readBy);
+    const chatRef = db.collection("chats").doc(chatId);
+    const batch = db.batch();
+    batch.set(chatRef, { lastMessageDeliveredTo: newDelivered, lastMessageStatus: newStatus }, {merge:true});
+    batch.update(chatRef.collection("messages").doc(chatData.lastMessageId), { deliveredTo: newDelivered, status: newStatus });
+    await batch.commit();
+  }catch(e){ console.error("group delivered mark failed", e); }
+}
+
+/* Full path: fires while the group chat is actually open, working off
+   the already-loaded message snapshot (no extra reads) — same source
+   markPeerMessagesRead uses for 1-1 chats. Marks me "delivered" on
+   every message from someone else I haven't been recorded on yet
+   (delivery isn't gated by the read-receipts toggle), and additionally
+   "read" if I have the toggle on. */
+async function markGroupMessagesReadAndDelivered(snapDocs, peer){
+  const allowRead = currentUser.readReceipts !== false;
+  const batch = db.batch();
+  const changes = {};
+  snapDocs.forEach(doc=>{
+    const m = doc.data();
+    if(m.senderId === currentUser.id) return;
+    const delivered = Array.isArray(m.deliveredTo) ? m.deliveredTo : [];
+    const read = Array.isArray(m.readBy) ? m.readBy : [];
+    const needsDelivered = !delivered.includes(currentUser.id);
+    const needsRead = allowRead && !read.includes(currentUser.id);
+    if(!needsDelivered && !needsRead) return;
+    const newDelivered = needsDelivered ? [...delivered, currentUser.id] : delivered;
+    const newRead = needsRead ? [...read, currentUser.id] : read;
+    const recipientIds = peer.members.filter(id=> id !== m.senderId);
+    const newStatus = computeGroupMessageStatus(recipientIds, newDelivered, newRead);
+    const updates = {};
+    if(needsDelivered) updates.deliveredTo = newDelivered;
+    if(needsRead) updates.readBy = newRead;
+    if(newStatus !== (m.status || "sent")) updates.status = newStatus;
+    batch.update(doc.ref, updates);
+    changes[doc.id] = { deliveredTo: newDelivered, readBy: newRead, status: newStatus };
+  });
+  if(!Object.keys(changes).length) return;
+  try{
+    await batch.commit();
+    /* mirror onto the chat doc if the true last message (chronologically
+       last in this asc-ordered snapshot) is one of the ones we just
+       changed, so the sidebar preview tick updates too */
+    const lastDoc = snapDocs[snapDocs.length - 1];
+    const lastChange = lastDoc && changes[lastDoc.id];
+    if(lastChange && chatDocExistsForActive && activeChatId){
+      db.collection("chats").doc(activeChatId).set({
+        lastMessageStatus: lastChange.status,
+        lastMessageDeliveredTo: lastChange.deliveredTo,
+        lastMessageReadBy: lastChange.readBy
+      }, {merge:true}).catch(()=>{});
+    }
+  }catch(e){
+    console.error("group read mark failed", e);
+    if(e && e.code === "permission-denied"){
+      toast("علامة القراءة متقدرتش تتحدث، الصلاحيات على قاعدة البيانات (Firestore Rules) مش سامحة إني أعدّل رسايل الشخص التاني.", true);
+    }
+  }
+}
+
 async function openChat(peer){
   /* already sitting in this exact conversation — closeActiveChat() (the
      mobile back button) is what actually tears down the listeners and
@@ -2154,7 +2646,8 @@ async function openChat(peer){
   if(activeChatPeer && activeChatPeer.id === peer.id) return;
   closePeerProfile();
   const previousPeerId = activeChatPeer ? activeChatPeer.id : null;
-  if(!peer.uid){
+  if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
+  if(!peer.isGroup && !peer.uid){
     try{
       const s = await db.collection("users").where("id","==",peer.id).limit(1).get();
       if(!s.empty) peer.uid = s.docs[0].id;
@@ -2162,7 +2655,7 @@ async function openChat(peer){
   }
   activeChatPeer = peer;
   if(previousPeerId && previousPeerId !== peer.id) refreshChatItemDraft(previousPeerId);
-  activeChatId = chatIdFor(currentUser.id, peer.id);
+  activeChatId = peer.isGroup ? peer.id : chatIdFor(currentUser.id, peer.id);
   peerCache[peer.id] = peer;
   watchPeer(peer);
   saveLastChat(peer.id);
@@ -2175,19 +2668,35 @@ async function openChat(peer){
   $("#chatPlaceholder").classList.add("hidden");
   $("#chatActive").classList.remove("hidden");
   $("#app").classList.add("chat-open");
+  /* Group chats and Wasla-AI don't have a meaningful "ID" line under
+     the name (a member count / internal id isn't something people
+     need to see there) — for those, the name itself is always the
+     one and only prominent line in the header, same visual weight as
+     a saved contact gets. Regular unsaved contacts keep the old
+     ID-big/name-small layout. */
+  const isGroupOrAi = peer.isGroup || peer.id === AI_PEER_ID;
   $("#peerName").textContent = peerDisplayName(peer);
-  $("#peerId").textContent = peer.id;
-  $("#peerProfileTrigger").classList.toggle("peer-saved", isSavedContact(peer.id));
+  $("#peerId").textContent = peer.isGroup ? `${peer.members.length} أعضاء` : peer.id;
+  $("#peerId").classList.toggle("hidden", isGroupOrAi);
+  $("#peerProfileTrigger").classList.toggle("peer-saved", isGroupOrAi || isSavedContact(peer.id));
   $("#peerStatus").textContent = "";
-  $("#peerStatus").classList.add("hidden");
+  $("#peerStatus").classList.toggle("hidden", !peer.isGroup);
   setAvatarNode($("#peerAvatar"), peerDisplayName(peer), peer.photoURL);
   setWallpaperCSS($("#messages"), localStorage.getItem(prefKey("wallpaper")) || "");
 
   $$(".chat-item").forEach(n=>n.classList.remove("active"));
 
   /* Wasla AI can't be blocked — it's not a real user, so the block
-     button has no meaning here and is hidden entirely */
-  $("#blockBtn").classList.toggle("hidden", peer.id === AI_PEER_ID);
+     button has no meaning here and is hidden entirely. Groups aren't
+     blockable either — there's no single peer to block. */
+  $("#blockBtn").classList.toggle("hidden", peer.id === AI_PEER_ID || peer.isGroup);
+
+  /* Wasla AI only understands plain text — no file uploads and no polls
+     make sense in that chat, so those two attach-menu options are
+     hidden while it's the active conversation */
+  const isAiPeer = peer.id === AI_PEER_ID;
+  $("#attachFileBtn").classList.toggle("hidden", isAiPeer);
+  $("#attachPollBtn").classList.toggle("hidden", isAiPeer);
 
   updateBlockBanner();
 
@@ -2208,9 +2717,14 @@ async function openChat(peer){
   if(chatSnap.exists){
     chatDocExistsForActive = true;
     await chatRef.set({
-      participants:[currentUser.id, peer.id],
+      participants: chatParticipantsFor(peer),
       unreadCounts: { [currentUser.id]: 0 }
     }, {merge:true});
+  }
+  if(peer.isGroup){
+    await preloadGroupMembers(peer);
+    updateGroupOnlineStatus(peer);
+    watchGroupPresence(peer);
   }
   frozenChatListPreview = {
     peerId: peer.id,
@@ -2260,6 +2774,13 @@ async function openChat(peer){
      reactions looked like last time, so only the one that actually
      changed gets to animate on the next redraw. */
   let reactionsRenderCache = {};
+  /* poll bars: #messages gets fully wiped + rebuilt on every snapshot, so
+     a bar's fill div is always inserted already sitting at its final
+     width — nothing for the CSS width transition to animate from, so a
+     vote used to just snap the bar bigger instead of growing smoothly.
+     This remembers each option's last-rendered % so the new fill can be
+     dropped back to that old width first, then eased up to the real one. */
+  let pollBarPrevWidths = {};
   /* the actual rebuild, pulled out into its own function so it can be
      re-run once a finger lifts (see the touchHoldActive guard below) as
      well as from the live onSnapshot callback itself. */
@@ -2274,6 +2795,7 @@ async function openChat(peer){
       msgsBox.innerHTML = "";
       messagesData = {};
       let lastDay = "";
+      const isGroupChat = !!(activeChatPeer && activeChatPeer.isGroup);
       snap.forEach(doc=>{
         const m = doc.data();
         /* messages "deleted for me" stay in Firestore for the other side,
@@ -2303,8 +2825,9 @@ async function openChat(peer){
         } else {
           if(m.replyTo){
             const quotedIsMine = m.replyTo.senderId === currentUser.id;
-            const quotedName = quotedIsMine ? "انت" : (activeChatPeer ? peerDisplayName(activeChatPeer) : "");
-            inner += `<div class="msg-reply-quote" data-goto="${m.replyTo.id}"><strong>${escapeHtml(quotedName)}</strong><span>${escapeHtml(m.replyTo.text || "")}</span></div>`;
+            const quotedName = quotedIsMine ? "انت" : (activeChatPeer && activeChatPeer.isGroup ? (groupMemberInfo(m.replyTo.senderId).name || "") : (activeChatPeer ? peerDisplayName(activeChatPeer) : ""));
+            const quotedIcon = m.replyTo.isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "";
+            inner += `<div class="msg-reply-quote" data-goto="${m.replyTo.id}"><strong>${escapeHtml(quotedName)}</strong><span>${quotedIcon}${escapeHtml(m.replyTo.text || "")}</span></div>`;
           }
           if(m.type === "voice"){
             inner += `<div class="msg-voice" data-duration="${m.duration||0}">
@@ -2322,6 +2845,8 @@ async function openChat(peer){
                 <span class="msg-file-size">${fmtFileSize(m.fileSize||0)}</span>
               </div>
             </div>`;
+          } else if(m.type === "poll"){
+            inner += pollBubbleHTML(m, doc.id);
           } else {
             inner += `<span class="msg-text">${escapeHtml(m.text)}</span>`;
           }
@@ -2349,7 +2874,29 @@ async function openChat(peer){
             bubble.classList.add("has-reactions");
           }
         }
-        msgsBox.appendChild(bubble);
+        if(isGroupChat && !isOut){
+          const sender = groupMemberInfo(m.senderId);
+          const row = document.createElement("div");
+          row.className = "msg-group-row";
+          const avatarWrap = document.createElement("div");
+          avatarWrap.className = "avatar msg-group-avatar";
+          avatarWrap.innerHTML = "<span></span><img class=\"hidden\">";
+          setAvatarNode(avatarWrap, sender.name, sender.photoURL);
+          const col = document.createElement("div");
+          col.className = "msg-group-col";
+          if(!m.deletedForEveryone){
+            const nameEl = document.createElement("span");
+            nameEl.className = "msg-group-sender";
+            nameEl.textContent = sender.name || "عضو";
+            col.appendChild(nameEl);
+          }
+          col.appendChild(bubble);
+          row.appendChild(avatarWrap);
+          row.appendChild(col);
+          msgsBox.appendChild(row);
+        } else {
+          msgsBox.appendChild(bubble);
+        }
 
         if(m.senderId === AI_PEER_ID && !m.deletedForEveryone && !hasGivenAiOpinion()){
           const fbRow = document.createElement("div");
@@ -2388,6 +2935,24 @@ async function openChat(peer){
          tap-to-download pill) — kick off the actual fetch for any that
          aren't already in flight or cached. */
       autoStartPendingImageDownloads();
+      /* replay poll bar growth: drop each fill back to the width it had
+         last render, force the browser to register that, then let it
+         ease up to the real width so the .3s transition in style.css
+         actually gets something to animate instead of a no-op. */
+      msgsBox.querySelectorAll(".poll-option-bar-fill").forEach(fillEl=>{
+        const optEl = fillEl.closest(".poll-option");
+        if(!optEl) return;
+        const key = optEl.dataset.msgid + "::" + optEl.dataset.optionId;
+        const targetPct = fillEl.dataset.pct || "0";
+        const prevPct = pollBarPrevWidths[key];
+        pollBarPrevWidths[key] = targetPct;
+        if(prevPct === undefined || prevPct === targetPct) return;
+        fillEl.style.transition = "none";
+        fillEl.style.width = prevPct + "%";
+        fillEl.getBoundingClientRect(); // force reflow so the width above actually takes hold
+        fillEl.style.transition = "";
+        requestAnimationFrame(()=>{ fillEl.style.width = targetPct + "%"; });
+      });
       /* the rebuild above just wiped #messages including the typing
          bubble (if it was there) — put it straight back, no animation
          needed since it was already visible a moment ago */
@@ -2407,7 +2972,15 @@ async function openChat(peer){
       }
       updateScrollToBottomBtn();
       if(isSelectionMode()) updateSelectionUI();
-      markPeerMessagesRead(snap.docs, peer.id);
+      /* if the poll voters page is open, refresh it too so a live vote
+         (or a vote time ticking from "الآن" to "من دقيقة") shows up
+         without the person having to close and reopen it */
+      const openVotersOverlay = $("#pollVotersOverlay");
+      if(openVotersOverlay && !openVotersOverlay.classList.contains("hidden") && currentVotersMsgId){
+        openPollVotersOverlay(currentVotersMsgId);
+      }
+      if(activeChatPeer && activeChatPeer.isGroup) markGroupMessagesReadAndDelivered(snap.docs, activeChatPeer);
+      else markPeerMessagesRead(snap.docs, peer.id);
       /* keep my own unread badge for this chat at 0 while I'm actively
          looking at it, in case a new message lands while it's open —
          but only touch the doc if it actually exists, otherwise this
@@ -2604,6 +3177,7 @@ syncAiFeedbackPageWithHash();
 function closeActiveChat(){
   if(msgUnsub){ msgUnsub(); msgUnsub = null; }
   if(chatDocUnsub){ chatDocUnsub(); chatDocUnsub = null; }
+  if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
   activeChatPeer = null; activeChatId = null;
   chatDocExistsForActive = false; activeChatDocData = null;
   messagesData = {}; currentPinnedId = null; pinnedFocusIndex = 0; pinnedMessagesList = [];
@@ -2691,7 +3265,7 @@ function renderPinnedBanner(chatData){
   if(pinnedFocusIndex >= live.length) pinnedFocusIndex = 0;
   const current = live[pinnedFocusIndex];
   currentPinnedId = current.id;
-  textEl.textContent = current.text || "";
+  textEl.innerHTML = (current.isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "") + escapeHtml(current.text || "");
   banner.classList.remove("hidden");
 
   if(dashesEl){
@@ -2852,7 +3426,8 @@ async function togglePin(id, m, durationMs){
       }
       list.push({
         id,
-        text: (m.text || "").slice(0,140),
+        text: (m.type === "poll" ? ((m.poll && m.poll.question) || "") : (m.text || "")).slice(0,140),
+        isPoll: m.type === "poll",
         senderId: m.senderId,
         pinnedUntil: now + (durationMs || 604800000)
       });
@@ -2892,9 +3467,11 @@ function setReplyTo(id){
   const m = messagesData[id];
   if(!m) return;
   const isOut = m.senderId === currentUser.id;
-  replyingTo = { id, senderId: m.senderId, text: (m.text || "").slice(0,300) };
+  const isPoll = m.type === "poll";
+  const previewText = isPoll ? ((m.poll && m.poll.question) || "") : (m.text || "").slice(0,300);
+  replyingTo = { id, senderId: m.senderId, text: previewText, isPoll };
   $("#replyPreviewName").textContent = isOut ? "انت" : (activeChatPeer ? peerDisplayName(activeChatPeer) : "");
-  $("#replyPreviewText").textContent = m.text || "";
+  $("#replyPreviewText").innerHTML = (isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "") + escapeHtml(previewText);
   $("#replyPreview").classList.remove("hidden");
   $("#messageInput").focus();
 }
@@ -2902,7 +3479,7 @@ function clearReplyState(){
   replyingTo = null;
   $("#replyPreview").classList.add("hidden");
   $("#replyPreviewName").textContent = "";
-  $("#replyPreviewText").textContent = "";
+  $("#replyPreviewText").innerHTML = "";
 }
 $("#cancelReplyBtn").addEventListener("click", clearReplyState);
 
@@ -2942,7 +3519,8 @@ function openDeleteModal(ids, isOut){
   const many = ids.length > 1;
   $("#deleteModalTitle").textContent = many ? "حذف الرسائل" : "حذف الرسالة";
   $("#deleteModalText").textContent = many ? `عايز تحذف الـ ${ids.length} رسائل دي منين؟` : "عايز تحذفها منين؟";
-  $("#deleteForEveryoneBtn").classList.toggle("hidden", !isOut);
+  const isAiChat = activeChatPeer && activeChatPeer.id === AI_PEER_ID;
+  $("#deleteForEveryoneBtn").classList.toggle("hidden", !isOut || isAiChat);
   $("#deleteOverlay").classList.remove("hidden");
 }
 function closeDeleteModal(){
@@ -4436,18 +5014,22 @@ async function stopAndSendVoice(){
     const msgPayload = {
       senderId: currentUser.id, type:"voice", audioUrl:url, duration:durationSec,
       status: isAiChat ? "read" : "sent",
+      ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
-      participants:[currentUser.id, activeChatPeer.id],
+      participants: chatParticipantsFor(activeChatPeer),
       lastMessage: "🎤 رسالة صوتية",
       lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
       lastMessageStatus: isAiChat ? "read" : "sent",
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
-      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
     }, { merge:true });
     chatDocExistsForActive = true;
   }catch(err){
@@ -4491,6 +5073,205 @@ document.addEventListener("click", (e)=>{
 });
 $("#attachImageBtn").addEventListener("click", ()=>{ closeAttachMenu(); $("#attachImageInput").click(); });
 $("#attachFileBtn").addEventListener("click", ()=>{ closeAttachMenu(); $("#attachFileInput").click(); });
+$("#attachPollBtn").addEventListener("click", ()=>{ closeAttachMenu(); openPollCreateOverlay(); });
+
+/* =====================================================================
+   Poll creation page — question + 2..10 option inputs, growing by
+   itself: a new empty option box appears the moment the current last
+   one gets text, up to a hard cap of 10. Sending needs a non-empty
+   question and at least 2 filled options.
+   ===================================================================== */
+const POLL_MAX_OPTIONS = 10;
+const POLL_MIN_OPTIONS = 2;
+let pollOptionSeq = 0;
+
+function pollOptionRowEl(){
+  const row = document.createElement("div");
+  row.className = "poll-option-input-row";
+  row.innerHTML = `<span class="poll-option-handle">☰</span><input type="text" maxlength="100" placeholder="+ إضافة">`;
+  const input = row.querySelector("input");
+  input.addEventListener("input", ()=>{
+    row.classList.toggle("has-text", input.value.trim().length > 0);
+    const rows = [...$("#pollOptionsList").children];
+    const isLastRow = row === rows[rows.length - 1];
+    if(isLastRow && input.value.trim().length > 0 && rows.length < POLL_MAX_OPTIONS){
+      $("#pollOptionsList").appendChild(pollOptionRowEl());
+    }
+  });
+  /* clearing a row's text and moving on should make that row collapse
+     out of the list entirely — whether it's the trailing extra slot
+     that only existed because this row used to have text, or an option
+     sitting in the middle of the list. Runs on blur (not every
+     keystroke) so nothing vanishes out from under someone mid-edit. */
+  input.addEventListener("blur", ()=> setTimeout(()=> pruneEmptyPollOptionRow(row), 0));
+  return row;
+}
+function pruneEmptyPollOptionRow(row){
+  const list = $("#pollOptionsList");
+  if(!list || !row.isConnected) return;
+  const rows = [...list.children];
+  if(rows.length <= POLL_MIN_OPTIONS) return; // never drop below the minimum
+  const input = row.querySelector("input");
+  if(!input || input.value.trim().length > 0) return; // has text now, nothing to clean up
+  if(input === document.activeElement) return; // still being edited, leave it
+  if(row === rows[rows.length - 1]) return; // last row is the "+ إضافة" placeholder — always keep it
+  list.removeChild(row);
+}
+function resetPollCreateForm(){
+  $("#pollQuestionInput").value = "";
+  $("#pollAllowMultipleToggle").checked = true;
+  const list = $("#pollOptionsList");
+  list.innerHTML = "";
+  for(let i = 0; i < POLL_MIN_OPTIONS; i++) list.appendChild(pollOptionRowEl());
+}
+function openPollCreateOverlay(){
+  if(!activeChatPeer) return;
+  resetPollCreateForm();
+  $("#pollCreateOverlay").classList.remove("hidden");
+}
+function closePollCreateOverlay(){ $("#pollCreateOverlay").classList.add("hidden"); }
+$("#closePollCreate").addEventListener("click", closePollCreateOverlay);
+$("#pollCreateOverlay").addEventListener("click", e=>{
+  if(e.target.id === "pollCreateOverlay") closePollCreateOverlay();
+});
+
+$("#sendPollBtn").addEventListener("click", async ()=>{
+  const question = $("#pollQuestionInput").value.trim();
+  const optionTexts = [...$("#pollOptionsList").querySelectorAll("input")]
+    .map(inp=> inp.value.trim())
+    .filter(t=> t.length > 0);
+  if(!question){ toast("لازم تكتب سؤال الاستطلاع", true); return; }
+  if(optionTexts.length < POLL_MIN_OPTIONS){ toast("لازم خيارين على الأقل", true); return; }
+  const allowMultiple = $("#pollAllowMultipleToggle").checked;
+  await sendPollMessage(question, optionTexts, allowMultiple);
+  closePollCreateOverlay();
+});
+
+async function sendPollMessage(question, optionTexts, allowMultiple){
+  if(!activeChatPeer || !activeChatId) return;
+  const options = optionTexts.map(text=>{
+    pollOptionSeq++;
+    return { id: "o" + pollOptionSeq + "_" + Date.now().toString(36), text };
+  });
+  const isAiChat = activeChatPeer.id === AI_PEER_ID;
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
+  const msgPayload = {
+    senderId: currentUser.id, type: "poll",
+    poll: { question, options, allowMultiple, votes: {} },
+    status: isAiChat ? "read" : "sent",
+    ...groupReceiptPayload(activeChatPeer),
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try{
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
+    await db.collection("chats").doc(activeChatId).set({
+      participants: chatParticipantsFor(activeChatPeer),
+      lastMessage: "📊 " + question,
+      lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
+      lastMessageStatus: isAiChat ? "read" : "sent",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
+    }, { merge:true });
+    chatDocExistsForActive = true;
+  }catch(err){
+    console.error(err);
+    toast("تعذر إرسال الاستطلاع", true);
+  }
+}
+
+/* ---- voting: tap an option to pick it (single-choice replaces my
+   previous pick, multiple-choice toggles it on/off). One write per
+   tap straight to the message doc's poll.votes map; the existing
+   messages listener re-renders the bubble once the change lands, same
+   as reactions. ---- */
+async function voteOnPoll(msgId, optionId){
+  if(!activeChatId) return;
+  const m = messagesData[msgId];
+  if(!m || !m.poll) return;
+  const votes = m.poll.votes || {};
+  const mine = Array.isArray(votes[currentUser.id]) ? votes[currentUser.id] : [];
+  let updated;
+  if(m.poll.allowMultiple){
+    updated = mine.includes(optionId) ? mine.filter(id=> id !== optionId) : [...mine, optionId];
+  } else {
+    updated = mine.includes(optionId) ? [] : [optionId];
+  }
+  try{
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(msgId)
+      .update({
+        [`poll.votes.${currentUser.id}`]: updated,
+        [`poll.voteTimes.${currentUser.id}`]: firebase.firestore.FieldValue.serverTimestamp()
+      });
+  }catch(err){
+    console.error(err);
+    toast("تعذر تسجيل صوتك", true);
+  }
+}
+$("#messages").addEventListener("click", (e)=>{
+  if(isSelectionMode()) return;
+  const optEl = e.target.closest(".poll-option");
+  if(optEl){ voteOnPoll(optEl.dataset.msgid, optEl.dataset.optionId); return; }
+  const votesBtn = e.target.closest(".poll-show-votes");
+  if(votesBtn){ openPollVotersOverlay(votesBtn.dataset.msgid); return; }
+});
+
+/* ---- "عرض الأصوات" — full-page, read-only breakdown of who picked what,
+   grouped by option with an avatar + name + vote-time row per voter.
+   poll.voteTimes.{uid} is a serverTimestamp written in voteOnPoll()
+   every time that person casts/changes their vote. ---- */
+function pollVoteTimeLabel(ts){
+  if(!ts || !ts.toDate) return "";
+  const d = ts.toDate();
+  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if(diffSec < 60) return "الآن";
+  if(diffSec < 3600) return `من ${Math.floor(diffSec / 60)} دقيقة`;
+  if(diffSec < 86400) return fmtTime(ts);
+  return d.toLocaleDateString("ar-EG", {day:"numeric", month:"short"});
+}
+function pollVoterRowHTML(uid, ts){
+  const info = pollVoterInfo(uid) || {};
+  const name = info.name || "؟";
+  const avatar = info.photoURL
+    ? `<span class="pv-avatar"><img src="${escapeHtml(info.photoURL)}" alt=""></span>`
+    : `<span class="pv-avatar">${escapeHtml(initials(name))}</span>`;
+  const timeLabel = pollVoteTimeLabel(ts);
+  return `<div class="pv-row">
+    ${avatar}
+    <div class="pv-meta">
+      <span class="pv-name">${escapeHtml(name)}</span>
+      ${timeLabel ? `<span class="pv-time">${escapeHtml(timeLabel)}</span>` : ""}
+    </div>
+  </div>`;
+}
+let currentVotersMsgId = null;
+function openPollVotersOverlay(msgId){
+  const m = messagesData[msgId];
+  if(!m || !m.poll) return;
+  currentVotersMsgId = msgId;
+  const poll = m.poll;
+  const votes = poll.votes || {};
+  const voteTimes = poll.voteTimes || {};
+  const list = $("#pollVotersList");
+  list.innerHTML = (poll.options || []).map(opt=>{
+    const voterIds = Object.keys(votes).filter(uid=> Array.isArray(votes[uid]) && votes[uid].includes(opt.id));
+    return `<div class="pv-group">
+      <div class="pv-group-title">
+        <span>${escapeHtml(opt.text)}</span>
+        <span class="pv-count">${voterIds.length}</span>
+      </div>
+      ${voterIds.map(uid=> pollVoterRowHTML(uid, voteTimes[uid])).join("")}
+    </div>`;
+  }).join("");
+  $("#pollVotersOverlay").classList.remove("hidden");
+}
+$("#closePollVotersBtn").addEventListener("click", ()=>{
+  $("#pollVotersOverlay").classList.add("hidden");
+  currentVotersMsgId = null;
+});
 
 async function sendImageFile(file){
   if(!activeChatPeer || !activeChatId || !file) return;
@@ -4515,18 +5296,22 @@ async function sendImageFile(file){
     const msgPayload = {
       senderId: currentUser.id, type:"image", imageUrl:url, imageSize:file.size,
       status: isAiChat ? "read" : "sent",
+      ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
-      participants:[currentUser.id, activeChatPeer.id],
+      participants: chatParticipantsFor(activeChatPeer),
       lastMessage: "📷 صورة",
       lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
       lastMessageStatus: isAiChat ? "read" : "sent",
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
-      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
     }, { merge:true });
     chatDocExistsForActive = true;
   }catch(err){
@@ -4555,18 +5340,22 @@ async function sendGenericFile(file){
     const msgPayload = {
       senderId: currentUser.id, type:"file", fileUrl:url, fileName:file.name, fileSize:file.size,
       status: isAiChat ? "read" : "sent",
+      ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
-      participants:[currentUser.id, activeChatPeer.id],
+      participants: chatParticipantsFor(activeChatPeer),
       lastMessage: "📎 " + file.name,
       lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
       lastMessageStatus: isAiChat ? "read" : "sent",
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
-      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
     }, { merge:true });
     chatDocExistsForActive = true;
   }catch(err){
@@ -5079,23 +5868,27 @@ $("#composer").addEventListener("submit", async (e)=>{
     const isAiChat = activeChatPeer.id === AI_PEER_ID;
     const msgPayload = {
       senderId: currentUser.id, text, status: isAiChat ? "read" : "sent",
+      ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     if(replySnapshot){
-      msgPayload.replyTo = { id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text };
+      msgPayload.replyTo = { id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text, isPoll: !!replySnapshot.isPoll };
     }
     await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
-      participants:[currentUser.id, activeChatPeer.id],
+      participants: chatParticipantsFor(activeChatPeer),
       lastMessage: text,
       lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
       lastMessageStatus: isAiChat ? "read" : "sent",
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      unreadCounts: { [activeChatPeer.id]: firebase.firestore.FieldValue.increment(1) },
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
       /* a real new message means the conversation is active again — bring
          it back into the list for whichever side(s) had deleted it */
-      deletedFor: firebase.firestore.FieldValue.arrayRemove(currentUser.id, activeChatPeer.id)
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
     }, {merge:true});
     chatDocExistsForActive = true;
     if(activeChatPeer.id === AI_PEER_ID) requestAiReply(activeChatId, currentUser.id);
