@@ -2094,13 +2094,16 @@ async function markMessagesDeliveredForChat(chatId, peerId, chatData){
   }catch(e){ console.error("mark delivered failed", e); }
 }
 
-/* mirror of the sender-side gate in markPeerMessagesRead: even if a
-   peer's message genuinely reached "read" in Firestore, my own ticks
-   and chat-list preview must not show that blue double-check to me
-   when I've turned read receipts off myself — same "it works both
-   ways" rule WhatsApp uses. */
+/* Used to mask an already-"read" status back down to "delivered" on
+   every render whenever read receipts were currently off — which meant
+   flipping the setting repainted every OLD tick too (turn it off and
+   every past "read" message suddenly showed "delivered"; turn it back
+   on and they'd all flip back). The setting should only change what
+   happens to messages GOING FORWARD, same as markPeerMessagesRead's own
+   gate below: past ticks reflect whatever the DB genuinely recorded at
+   the time and are never repainted after the fact, so this is now a
+   passthrough. */
 function displayStatus(status){
-  if(status === "read" && currentUser && currentUser.readReceipts === false) return "delivered";
   return status;
 }
 
@@ -2110,7 +2113,10 @@ async function markPeerMessagesRead(snapDocs, peerId){
      never flip a peer's messages to "read", so their tick just sits at
      "delivered" forever on their end (same illusion as being blocked,
      but only for the read step). Defaults to true for old accounts
-     that don't have the field yet. */
+     that don't have the field yet. This is the ONE place the toggle
+     actually takes effect: it only ever gates messages read from this
+     point on — it never touches anything already marked "read" before
+     the toggle changed (see displayStatus above). */
   if(currentUser.readReceipts === false) return;
   const unread = snapDocs.filter(doc=>{
     const m = doc.data();
