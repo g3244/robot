@@ -4712,8 +4712,17 @@ function collapseComposerIfEmpty(){
 $("#messageInput").addEventListener("focus", ()=>{
   if(isSelectionMode()) exitSelectionMode();
   autoResizeComposer();
+  /* remembered so the keyboard-aware viewport handler (bottom of this
+     file) knows whether to follow the keyboard down to the latest
+     message or leave the scroll position alone — see the note there */
+  const msgsBox = $("#messages");
+  if(msgsBox){
+    const distanceFromBottom = msgsBox.scrollHeight - msgsBox.scrollTop - msgsBox.clientHeight;
+    keyboardShouldStickToBottom = distanceFromBottom < 80;
+  }
 });
 $("#messageInput").addEventListener("blur", collapseComposerIfEmpty);
+$("#messageInput").addEventListener("blur", ()=>{ keyboardShouldStickToBottom = false; });
 
 /* ---- save an unsent draft as the person types, WhatsApp-style ---- */
 let draftSaveTimer = null;
@@ -5379,13 +5388,29 @@ $$(".password-toggle").forEach(btn=>{
    a gap between the composer and the keyboard — .app kept its top edge
    pinned to the layout viewport's top while the visible area had moved
    down under it. Translating .app by that same offset keeps it glued to
-   what's actually on screen instead of floating up above it. */
+   what's actually on screen instead of floating up above it.
+
+   Shrinking #messages' visible height (its scrollHeight doesn't change,
+   only its clientHeight does) also has a side effect worth calling out:
+   if the person was already scrolled to the very bottom, the keyboard
+   rising would otherwise leave the latest message sitting just below the
+   new, smaller visible area — set by the "focus" handler on #messageInput
+   above (see keyboardShouldStickToBottom there). If instead they were
+   scrolled up reading older messages, we deliberately do nothing here —
+   scrollTop is left exactly as it was, so the same content they were
+   reading stays anchored in place instead of jumping down to the latest
+   message just because the keyboard opened. */
+let keyboardShouldStickToBottom = false;
 if(window.visualViewport){
   const appEl = document.querySelector(".app");
   const syncViewportHeight = () => {
     if(!appEl) return;
     appEl.style.height = window.visualViewport.height + "px";
     appEl.style.top = window.visualViewport.offsetTop + "px";
+    if(keyboardShouldStickToBottom){
+      const msgsBox = $("#messages");
+      if(msgsBox) setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
+    }
   };
   window.visualViewport.addEventListener("resize", syncViewportHeight);
   window.visualViewport.addEventListener("scroll", syncViewportHeight);
