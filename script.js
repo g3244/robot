@@ -2903,17 +2903,14 @@ async function openChat(peer){
           avatarWrap.className = "avatar msg-group-avatar";
           avatarWrap.innerHTML = "<span></span><img class=\"hidden\">";
           setAvatarNode(avatarWrap, sender.name, sender.photoURL);
-          const col = document.createElement("div");
-          col.className = "msg-group-col";
           if(!m.deletedForEveryone){
             const nameEl = document.createElement("span");
             nameEl.className = "msg-group-sender";
             nameEl.textContent = sender.name || "عضو";
-            col.appendChild(nameEl);
+            bubble.insertBefore(nameEl, bubble.firstChild);
           }
-          col.appendChild(bubble);
+          row.appendChild(bubble);
           row.appendChild(avatarWrap);
-          row.appendChild(col);
           msgsBox.appendChild(row);
         } else {
           msgsBox.appendChild(bubble);
