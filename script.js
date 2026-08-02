@@ -1973,13 +1973,15 @@ function unwatchAllPeers(){
 
 /* ---- Group "N online" count ----
    Shown in the header's small status line (the same spot a 1-1 chat
-   uses for "last seen"/typing) while a group chat is open: counts
-   every member — me included — currently online, live. Only tracked
-   for the group that's actually open right now (watchGroupPresence /
-   unwatchGroupPresence below), same scoping as the messages listener
-   itself, since keeping a listener per member per group open all the
-   time regardless of what's on screen would be a lot of idle
-   subscriptions for very little benefit. */
+   uses for "last seen"/typing) while a group chat is open: counts how
+   many OTHER members are currently online, live — never counts myself,
+   so the number I see is the same number everyone else in the group
+   sees (each person's own presence doesn't inflate their own count).
+   Only tracked for the group that's actually open right now
+   (watchGroupPresence / unwatchGroupPresence below), same scoping as
+   the messages listener itself, since keeping a listener per member
+   per group open all the time regardless of what's on screen would be
+   a lot of idle subscriptions for very little benefit. */
 const groupPresenceUnsubs = {}; // groupId -> array of unsubscribe fns
 function groupOnlineCount(peer){
   const others = peer.members.filter(id=> id !== currentUser.id);
@@ -1989,20 +1991,19 @@ function groupOnlineCount(peer){
     const privacy = p.lastSeenPrivacy || "everyone";
     return privacy === "everyone" || (privacy === "contacts" && isSavedContact(id));
   }).length;
-  return 1 + visibleOnline; // +1 for me — I'm obviously online right now
+  return visibleOnline; // never includes me — see note above
 }
 function updateGroupOnlineStatus(peer){
   if(!activeChatPeer || activeChatPeer.id !== peer.id || !peer.isGroup) return;
   const statusEl = $("#peerStatus");
   const count = groupOnlineCount(peer);
-  /* just me online isn't worth announcing — the line only appears once
-     there's actually someone else to report */
-  if(count < 2){
+  /* nobody else online -> nothing to report */
+  if(count < 1){
     statusEl.textContent = "";
     statusEl.classList.add("hidden");
     return;
   }
-  statusEl.textContent = `المتصلين ${count}`;
+  statusEl.textContent = `متصل ${count}`;
   statusEl.classList.remove("hidden");
 }
 function watchGroupPresence(peer){
