@@ -895,6 +895,10 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     <div class="search-result hidden" id="searchResult"></div>
 
     <div class="chat-list" id="chatList">
+      <div class="chat-list-loading hidden" id="chatListLoading">
+        <div class="cll-bar-track"><div class="cll-bar-fill"></div></div>
+        <span>بيتم تحميل المحادثات…</span>
+      </div>
       <div class="empty-state" id="chatListEmpty">
         <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <p>لسه معندكش أي محادثات.<br>ابحث برقم تعريف صاحبك وابدأ الدردشة</p>
@@ -1093,6 +1097,7 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
         <button class="tab-btn" data-tab="appearance">المظهر</button>
         <button class="tab-btn" data-tab="wallpaper">خلفية الدردشة</button>
         <button class="tab-btn" data-tab="privacy">الحظر والخصوصية</button>
+        <button class="tab-btn" data-tab="devices">مشاركة الإيميل</button>
       </nav>
 
       <div class="settings-body">
@@ -1190,6 +1195,24 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           <h3>المستخدمين المحظورين</h3>
           <div class="blocked-list" id="blockedList">
             <p class="hint-text">مفيش حد محظور حاليًا</p>
+          </div>
+        </div>
+
+        <div class="settings-pane" id="pane-devices">
+          <h3>مشاركة الإيميل</h3>
+          <p class="hint-text" id="devicesIntroText">من هنا تقدر تسمح لحد يسجل دخول بنفس بياناتك على جهاز تاني، وتشوف الأجهزة اللي فاتحة على حسابك دلوقتي.</p>
+
+          <div class="hidden" id="primaryDeviceBox">
+            <button type="button" class="primary-btn add-device-btn" id="addDeviceSlotBtn">إضافة مكان لجهاز جديد</button>
+            <p class="hint-text" id="deviceSlotsCountText"></p>
+
+            <h3>أماكن الأجهزة</h3>
+            <div class="blocked-list" id="linkedDevicesList">
+            </div>
+          </div>
+
+          <div class="hidden" id="secondaryDeviceBox">
+            <p class="hint-text">الجهاز ده مش الجهاز الأساسي لحسابك، فمش هيظهرلك هنا زرار إضافة أجهزة جديدة. لو عايز تسجل خروج من الجهاز ده بس، استخدم زرار تسجيل الخروج في تبويب الملف الشخصي.</p>
           </div>
         </div>
 

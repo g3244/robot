@@ -17,6 +17,24 @@ try{
     db = firebase.firestore();
     storage = firebase.storage();
     firebaseReady = true;
+    /* Local IndexedDB cache: without this, EVERY chat open (even one
+       opened a hundred times before) has to make a real round-trip to
+       Firestore's servers before anything can render — that network hop
+       is exactly the ~1s delay when switching chats. With persistence
+       on, Firestore hydrates onSnapshot() from the on-device cache
+       first (near-instant, no network wait) and only reconciles with
+       the server after, so a chat you've opened before now paints
+       immediately even on a fresh page load / cold start, not just
+       while chatMsgsPrefetchCache happens to still be warm in memory.
+       synchronizeTabs lets multiple open tabs share one cache instead
+       of the second tab silently failing to get persistence at all. */
+    db.enablePersistence({ synchronizeTabs: true }).catch(err=>{
+      /* failed-precondition = another tab already owns persistence in a
+         browser/version that doesn't support synchronizeTabs, unimplemented
+         = private browsing / old Safari with no IndexedDB — either way
+         the app must keep working, just without the offline speed boost */
+      console.warn("Firestore persistence not enabled:", err && err.code);
+    });
   } else {
     console.error("Firebase config is missing a real apiKey — fill in FIREBASE_CONFIG with your project's values.");
   }
@@ -27,8 +45,19 @@ try{
 /* ------------------------------------------------------------------ */
 let currentUser = null;          // { uid, id, name, bio, photoURL, blocked:[] }
 let activeChatPeer = null;       // { id, name, photoURL }
+let isPrimaryDeviceSession = false;   // is THIS device the account's primary (main) device?
+let ownDeviceUnsub = null;            // realtime listener that force-logs-out this device when needed
 let activeChatId = null;
 let msgUnsub = null, chatListUnsub = null, chatDocUnsub = null;
+/* chatId -> array of message docs, warmed in the background the moment a
+   chat shows up in the chat list (see prefetchChatMessages), so that by
+   the time someone actually taps into that chat, openChat() already has
+   its full message history sitting in memory and can render it straight
+   away instead of showing the "جاري تحميل الرسائل..." loader. Kept in
+   sync afterwards by the live messages listener in openChat, so it stays
+   warm for the next time this same chat is opened again. */
+const chatMsgsPrefetchCache = {};
+const chatMsgsPrefetchInFlight = new Set(); // chatIds currently mid-fetch, so a chat never gets fetched twice at once
 let chatDocExistsForActive = false; // does the currently-open chat's Firestore doc actually exist right now?
 let activeChatDocData = null;       // latest known data of the currently-open chat doc (for lastMessage* fields)
 let peerIsTyping = false;           // is the OTHER person in the open chat currently typing? (see showPeerTypingIndicator)
@@ -736,6 +765,143 @@ function fmtTime(ts){
 })();
 
 /* =====================================================================
+   1.5) EMAIL / ACCOUNT SHARING (multi-device slots)
+   Every browser gets a random deviceId saved in localStorage. The FIRST
+   device that ever logs into an account is its "primary" device — only
+   that device can see the "add a device slot" button (up to 5 slots).
+   A brand-new device can join by itself as long as a free slot exists;
+   otherwise it's turned away and asked to get the primary's OK first.
+   Logging out from the primary device force-logs-out every shared
+   device at once and clears the sharing list; whoever logs back in
+   next becomes the new primary (nobody else is auto-signed-in again).
+   ===================================================================== */
+const MAX_SHARED_SLOTS = 5;
+
+function getDeviceId(){
+  try{
+    let id = localStorage.getItem("wasla_device_id");
+    if(!id){
+      id = "d_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      localStorage.setItem("wasla_device_id", id);
+    }
+    return id;
+  }catch(e){ return "d_" + Date.now(); }
+}
+
+function deviceLabel(){
+  const ua = navigator.userAgent || "";
+  let os = "جهاز غير معروف";
+  if(/Windows/i.test(ua)) os = "ويندوز";
+  else if(/Android/i.test(ua)) os = "أندرويد";
+  else if(/iPhone|iPad|iPod/i.test(ua)) os = "آيفون/آيباد";
+  else if(/Macintosh|Mac OS/i.test(ua)) os = "ماك";
+  else if(/Linux/i.test(ua)) os = "لينكس";
+  let browser = "متصفح";
+  if(/Edg\//i.test(ua)) browser = "Edge";
+  else if(/OPR\/|Opera/i.test(ua)) browser = "Opera";
+  else if(/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) browser = "Chrome";
+  else if(/Firefox\//i.test(ua)) browser = "Firefox";
+  else if(/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = "Safari";
+  return `${browser} - ${os}`;
+}
+
+/* deviceSlots is an array (max 5 items) that lives on the user doc.
+   Each item is EITHER null (an open place nobody has claimed yet) OR a
+   { deviceId, name, addedAt } object (a device currently signed in
+   through that place). Reads old accounts that only have the earlier
+   sharedSlots/linkedDevices fields and folds them into this shape. */
+function normalizeDeviceSlots(data){
+  if(Array.isArray(data.deviceSlots)) return data.deviceSlots.map(s=> s || null);
+  const legacyLinked = Array.isArray(data.linkedDevices) ? data.linkedDevices : [];
+  const legacyCount = Number(data.sharedSlots) || 0;
+  const slots = legacyLinked.slice(0, legacyCount);
+  while(slots.length < legacyCount) slots.push(null);
+  return slots;
+}
+
+/* Runs right after a successful sign-in (register OR login) and decides
+   whether this device is allowed onto the account:
+   - returns {ok:true}  -> free to continue into the app
+   - returns {ok:false} -> no open place; caller must sign the user back
+     out and show them the "ask the primary device to add you" message */
+async function claimOrCheckDeviceAccess(uid, data){
+  const deviceId = getDeviceId();
+  const userRef = db.collection("users").doc(uid);
+
+  const primaryDeviceId = data.primaryDeviceId || null;
+  const deviceSlots = normalizeDeviceSlots(data);
+
+  /* nobody currently claims to be the primary (brand-new account, an
+     account created before this feature existed, or everyone just got
+     mass-logged-out) -> this device becomes the new primary and the
+     sharing list starts fresh */
+  if(!primaryDeviceId){
+    await userRef.set({ primaryDeviceId: deviceId, deviceSlots: [] }, {merge:true});
+    isPrimaryDeviceSession = true;
+    return {ok:true, patch:{ primaryDeviceId: deviceId, deviceSlots: [] }};
+  }
+
+  if(deviceId === primaryDeviceId){
+    isPrimaryDeviceSession = true;
+    return {ok:true, patch:{ primaryDeviceId, deviceSlots }};
+  }
+
+  /* already occupying one of the places on this account */
+  if(deviceSlots.some(s=> s && s.deviceId === deviceId)){
+    isPrimaryDeviceSession = false;
+    return {ok:true, patch:{ primaryDeviceId, deviceSlots }};
+  }
+
+  /* new device trying to join — allowed only if there's an open place
+     the primary made room for */
+  const emptyIdx = deviceSlots.findIndex(s=> !s);
+  if(emptyIdx !== -1){
+    const entry = { deviceId, name: deviceLabel(), addedAt: Date.now() };
+    const nextSlots = deviceSlots.slice();
+    nextSlots[emptyIdx] = entry;
+    await userRef.update({ deviceSlots: nextSlots });
+    isPrimaryDeviceSession = false;
+    return {ok:true, patch:{ primaryDeviceId, deviceSlots: nextSlots }};
+  }
+
+  isPrimaryDeviceSession = false;
+  return {ok:false};
+}
+
+/* keeps watching this device's own account while the app is open, so a
+   shared device gets kicked out immediately if the primary logs it out
+   (or logs everyone out) — without needing to refresh the page */
+function watchOwnDevice(uid){
+  if(ownDeviceUnsub){ ownDeviceUnsub(); ownDeviceUnsub = null; }
+  ownDeviceUnsub = db.collection("users").doc(uid).onSnapshot(snap=>{
+    if(!snap.exists || !currentUser) return;
+    const data = snap.data();
+    currentUser.primaryDeviceId = data.primaryDeviceId || null;
+    currentUser.deviceSlots = normalizeDeviceSlots(data);
+
+    const deviceId = getDeviceId();
+    if(deviceId === currentUser.primaryDeviceId){
+      isPrimaryDeviceSession = true;
+    } else {
+      const stillIn = currentUser.deviceSlots.some(s=> s && s.deviceId === deviceId);
+      isPrimaryDeviceSession = false;
+      if(!stillIn){
+        toast("تم تسجيل خروجك من هذا الجهاز");
+        logout();
+        return;
+      }
+    }
+    if(!$("#settingsOverlay").classList.contains("hidden") && $("#pane-devices").classList.contains("active")){
+      renderDevicesPane();
+    }
+  });
+}
+function stopWatchingOwnDevice(){
+  if(ownDeviceUnsub){ ownDeviceUnsub(); ownDeviceUnsub = null; }
+  isPrimaryDeviceSession = false;
+}
+
+/* =====================================================================
    2) AUTH FLOW
    ===================================================================== */
 function onGateSuccess(){
@@ -749,7 +915,14 @@ function onGateSuccess(){
       try{
         const snap = await db.collection("users").doc(user.uid).get();
         if(snap.exists){
-          currentUser = { uid:user.uid, ...snap.data() };
+          const access = await claimOrCheckDeviceAccess(user.uid, snap.data());
+          if(!access.ok){
+            try{ await auth.signOut(); }catch(e){}
+            resetUIAfterAuthEnd();
+            $("#authError").textContent = "يرجى زيادة مشاركة الأجهزة من الإيميل الخاص.";
+            return;
+          }
+          currentUser = { uid:user.uid, ...snap.data(), ...access.patch };
           if(!Array.isArray(currentUser.savedContacts)) currentUser.savedContacts = [];
           /* people blocked before this feature existed have no blockedAt
              entry yet — backfill one now (starting from "now") so their
@@ -843,9 +1016,11 @@ $("#registerBtn").addEventListener("click", async ()=>{
     const profile = {
       id, name, bio: bio || "", photoURL: pendingPhoto || "",
       blocked: [], blockedAt: {}, sealedBlocks: {}, pinnedChats: [], savedContacts: [], lastSeenPrivacy: "everyone", readReceipts: true,
+      primaryDeviceId: getDeviceId(), deviceSlots: [],
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("users").doc(uid).set(profile);
+    isPrimaryDeviceSession = true;
     currentUser = { uid, ...profile, blocked: [], blockedAt: {}, sealedBlocks: {}, pinnedChats: [], savedContacts: [] };
     enterApp();
   }catch(err){
@@ -926,6 +1101,28 @@ async function logout(){
     if(msgUnsub){ msgUnsub(); msgUnsub = null; }
     if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
     unwatchAllPeers();
+    stopWatchingOwnDevice();
+
+    if(currentUser && currentUser.uid && db){
+      const deviceId = getDeviceId();
+      const userRef = db.collection("users").doc(currentUser.uid);
+      try{
+        if(isPrimaryDeviceSession){
+          /* logging out from the primary device kicks every shared
+             device out at once, and frees the account up so whoever
+             logs in next becomes the new primary */
+          await userRef.update({ primaryDeviceId: null, deviceSlots: [] });
+        } else {
+          /* a shared device logging out just empties its own place
+             back up, without touching anyone else's place or the
+             places count itself */
+          const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
+          const idx = slots.findIndex(s=> s && s.deviceId === deviceId);
+          if(idx !== -1){ slots[idx] = null; await userRef.update({ deviceSlots: slots }); }
+        }
+      }catch(e){ console.error(e); }
+    }
+
     if(auth) await auth.signOut();
   }catch(e){ console.error(e); }
 
@@ -1077,6 +1274,7 @@ function enterApp(){
   renderBlockedList();
   listenChatList();
   startPresenceTracking();
+  watchOwnDevice(currentUser.uid);
   /* NOTE: no auto-reopen of the last chat here on purpose — a refresh
      (or logging back in, on any device) should always land on the
      chat list / placeholder screen, and the person picks which
@@ -1270,12 +1468,38 @@ function listenChatList(){
      error), which looked exactly like "the other person's chat list
      never updates". Sorting the small chat list client-side avoids
      needing that index at all. */
+  showChatListLoading();
   chatListUnsub = db.collection("chats")
     .where("participants","array-contains", currentUser.id)
     .onSnapshot(async (snap)=>{
       lastChatListSnapDocs = snap.docs;
       await renderChatList(snap.docs);
     }, err=> console.error("chat list error", err));
+}
+
+/* Shows the centered bar/spinner over the chat list. Called the moment
+   we start listening (before Firestore has replied at all), and hidden
+   again only once renderChatList has finished building EVERY item —
+   never left up mid-way through, and never toggled per-item. */
+function showChatListLoading(){
+  $("#chatListLoading").classList.remove("hidden");
+  $("#chatListEmpty").classList.add("hidden");
+}
+function hideChatListLoading(){
+  $("#chatListLoading").classList.add("hidden");
+}
+
+/* Warms chatMsgsPrefetchCache for one chat's messages in the background
+   the moment it shows up in the chat list. Safe to call on every single
+   chat-list render — a chat that's already cached, or already mid-fetch,
+   is skipped instantly, so this never re-fetches the same chat twice. */
+function prefetchChatMessages(chatId){
+  if(chatMsgsPrefetchCache[chatId] || chatMsgsPrefetchInFlight.has(chatId)) return;
+  chatMsgsPrefetchInFlight.add(chatId);
+  db.collection("chats").doc(chatId).collection("messages").orderBy("ts","asc").get()
+    .then(snap=>{ chatMsgsPrefetchCache[chatId] = snap.docs; })
+    .catch(e=> console.error("prefetch messages failed", chatId, e))
+    .finally(()=> chatMsgsPrefetchInFlight.delete(chatId));
 }
 
 async function renderChatList(rawDocs){
@@ -1311,14 +1535,16 @@ async function renderChatList(rawDocs){
     return bt - at;
   });
 
-  list.querySelectorAll(".chat-item").forEach(n=>n.remove());
-  const seenPeerIds = [];
-  for(const doc of docs){
+  /* ---- Phase 1: resolve every doc's peer (this is the only part that
+     ever needs a network round-trip, when a peer isn't cached yet).
+     Done as one Promise.all instead of "await" inside the render loop
+     so the list can't half-render — nothing touches the DOM until every
+     peer is known. ---- */
+  const resolved = await Promise.all(docs.map(async (doc)=>{
     const data = doc.data();
     const isGroup = data.type === "group";
     const peerId = isGroup ? doc.id : data.participants.find(p=>p!==currentUser.id);
-    if(!peerId) continue;
-    seenPeerIds.push(peerId);
+    if(!peerId) return null;
     let peer;
     if(isGroup){
       peer = { id: doc.id, isGroup:true, name: data.groupName || "مجموعة", photoURL: data.groupPhotoURL || "", members: data.participants.slice() };
@@ -1331,6 +1557,20 @@ async function renderChatList(rawDocs){
         peerCache[peerId] = peer;
       }
     }
+    return { doc, data, isGroup, peerId, peer };
+  }));
+
+  /* ---- Phase 2: build every row into an off-DOM fragment, then drop
+     the whole thing in with a single appendChild — this is what makes
+     the list appear all together instead of trickling in one row at a
+     time as each peer lookup resolved. ---- */
+  list.querySelectorAll(".chat-item").forEach(n=>n.remove());
+  const seenPeerIds = [];
+  const frag = document.createDocumentFragment();
+  for(const r of resolved){
+    if(!r) continue;
+    const { doc, data, isGroup, peerId, peer } = r;
+    seenPeerIds.push(peerId);
     const unread = (data.unreadCounts && data.unreadCounts[currentUser.id]) || 0;
     const isOpenRightNow = activeChatPeer && activeChatPeer.id === peerId;
     const draftText = isOpenRightNow ? "" : getDraftText(isGroup ? peerId : chatIdFor(currentUser.id, peerId));
@@ -1384,9 +1624,22 @@ async function renderChatList(rawDocs){
       e.stopPropagation();
       togglePinChat(peerId);
     });
-    list.appendChild(item);
-    watchPeer(peer);
+    frag.appendChild(item);
+  }
+  list.appendChild(frag); // one paint for the whole list, not one per row
+  hideChatListLoading();
 
+  /* ---- Phase 3: side effects (presence watchers, delivered-receipt
+     writes) — these don't touch what's on screen, so they run after
+     the list is already fully visible instead of gating it. ---- */
+  for(const r of resolved){
+    if(!r) continue;
+    const { doc, data, isGroup, peerId, peer } = r;
+    watchPeer(peer);
+    /* warm this chat's messages in the background right now, so opening
+       it later doesn't need to wait on Firestore at all — see
+       prefetchChatMessages above */
+    prefetchChatMessages(doc.id);
     /* my chat list just refreshed, which means I'm online right now
        and have received this chat's data — that's the moment a
        "sent" message from the peer counts as "delivered" (single
@@ -1394,6 +1647,7 @@ async function renderChatList(rawDocs){
     if(isGroup) markGroupLastMessageDelivered(doc.id, peer, data);
     else markMessagesDeliveredForChat(doc.id, peerId, data);
   }
+
   visibleChatPeerIds = seenPeerIds.slice();
   if(!$("#friendsOverlay").classList.contains("hidden")) renderFriendsPage();
 
@@ -2878,64 +3132,25 @@ async function openChat(peer){
      handler below), exactly like a real chat app. */
   chatDocExistsForActive = false;
   activeChatDocData = null;
-  const chatRef = db.collection("chats").doc(activeChatId);
-  const chatSnap = await chatRef.get();
-  if(chatSnap.exists){
-    chatDocExistsForActive = true;
-    await chatRef.set({
-      participants: chatParticipantsFor(peer),
-      unreadCounts: { [currentUser.id]: 0 }
-    }, {merge:true});
-  }
-  if(peer.isGroup){
-    await preloadGroupMembers(peer);
-    updateGroupOnlineStatus(peer);
-    watchGroupPresence(peer);
-  }
-  frozenChatListPreview = {
-    peerId: peer.id,
-    lastMessage: chatSnap.exists ? (chatSnap.data().lastMessage || "") : "",
-    lastMessageSenderId: chatSnap.exists ? (chatSnap.data().lastMessageSenderId || null) : null,
-    lastMessageStatus: chatSnap.exists ? (chatSnap.data().lastMessageStatus || "sent") : "sent"
-  };
 
+  /* Repaint #messages the INSTANT we know which chat is opening next —
+     before ANY of the awaited Firestore calls below. Previously all of
+     this (stopping the old chat's live listener, wiping the old
+     bubbles, painting the new chat's cache or the loading placeholder)
+     only happened AFTER "await chatRef.get()" had already resolved, so
+     the header swapped to the new person instantly but their old
+     messages kept sitting on screen underneath it for however long
+     that round-trip took — exactly the "previous chat hangs around for
+     a second" glitch. Leaving a chat is now exactly as fast as opening
+     the next one, both in the same synchronous tick. */
+  if(msgUnsub) msgUnsub();
   clearReplyState();
   cancelEditIfActive();
   hideDeletedForMeBar();
   messagesData = {};
   pendingBubbleNodes.clear();
   exitSelectionMode();
-
-  if(chatDocUnsub) chatDocUnsub();
-  chatDocUnsub = db.collection("chats").doc(activeChatId).onSnapshot(csnap=>{
-    chatDocExistsForActive = csnap.exists;
-    activeChatDocData = csnap.exists ? csnap.data() : null;
-    renderPinnedBanner(csnap.data());
-    if(peer.id === AI_PEER_ID){
-      const typing = !!(csnap.exists && csnap.data().aiTyping);
-      $("#peerStatus").textContent = typing ? "بيكتب..." : "";
-      $("#peerStatus").classList.toggle("hidden", !typing);
-    }else{
-      /* real person on the other end: their typing status is written
-         to their own "typing_<theirId>" field on this same chat doc
-         (see notifyTyping below) — show/hide the dots bubble to match.
-         NOTE: this is intentionally ONE-WAY, not tied to my own
-         "الرسائل المقروءة" toggle — that toggle only stops notifyTyping()
-         from broadcasting MY typing status to them (see the readReceipts
-         check there); it must never stop me from seeing THEIRS. Turning
-         it off means "he can't see me typing", not "we both go blind".
-         Also cached in peerIsTyping so the messages listener below can
-         re-add the bubble after it wipes #messages to redraw. */
-      const iBlockedThemForTyping = Array.isArray(currentUser.blocked) && currentUser.blocked.includes(peer.id);
-      const theyBlockedMeForTyping = !!peerBlockHidden[peer.id];
-      peerIsTyping = !iBlockedThemForTyping && !theyBlockedMeForTyping && !!(csnap.exists && csnap.data()[`typing_${peer.id}`]);
-      if(peerIsTyping) showPeerTypingIndicator(); else removePeerTypingIndicator();
-    }
-  }, err=> console.error("chat doc watch error", err));
-
-  if(msgUnsub) msgUnsub();
   const msgsBox = $("#messages");
-  msgsBox.innerHTML = `<p class="hint-text" style="text-align:center;">جاري تحميل الرسائل...</p>`;
   $("#scrollToBottomBtn").classList.remove("hidden", "stbb-show");
   /* every snapshot rebuilds ALL bubbles from scratch (see below), so
      without this, any unrelated change anywhere in the chat (someone
@@ -2956,6 +3171,10 @@ async function openChat(peer){
      re-run once a finger lifts (see the touchHoldActive guard below) as
      well as from the live onSnapshot callback itself. */
   const renderMsgsSnapshot = (snap) => {
+      /* accepts either a live Firestore QuerySnapshot (has .docs) or a
+         plain array of doc snapshots (the warmed-up prefetch cache) —
+         everything below just walks snapDocs, so it doesn't care which */
+      const snapDocs = snap.docs || snap;
       /* "smart scroll": remember how far from the bottom the person was
          BEFORE we wipe+rebuild the list below, so someone who's scrolled
          up reading old messages doesn't get yanked back down every time
@@ -2967,7 +3186,7 @@ async function openChat(peer){
       messagesData = {};
       let lastDay = "";
       const isGroupChat = !!(activeChatPeer && activeChatPeer.isGroup);
-      snap.forEach(doc=>{
+      snapDocs.forEach(doc=>{
         const m = doc.data();
         /* messages "deleted for me" stay in Firestore for the other side,
            but must never render on my screen again */
@@ -3163,8 +3382,8 @@ async function openChat(peer){
       if(openVotersOverlay && !openVotersOverlay.classList.contains("hidden") && currentVotersMsgId){
         openPollVotersOverlay(currentVotersMsgId);
       }
-      if(activeChatPeer && activeChatPeer.isGroup) markGroupMessagesReadAndDelivered(snap.docs, activeChatPeer);
-      else markPeerMessagesRead(snap.docs, peer.id);
+      if(activeChatPeer && activeChatPeer.isGroup) markGroupMessagesReadAndDelivered(snapDocs, activeChatPeer);
+      else markPeerMessagesRead(snapDocs, peer.id);
       /* keep my own unread badge for this chat at 0 while I'm actively
          looking at it, in case a new message lands while it's open —
          but only touch the doc if it actually exists, otherwise this
@@ -3175,6 +3394,24 @@ async function openChat(peer){
         }, {merge:true}).catch(()=>{});
       }
   };
+
+  /* If the chat list already warmed this conversation up in the
+     background (see prefetchChatMessages), render it right now, straight
+     from that cache — the "جاري تحميل الرسائل..." loader never even
+     gets a chance to appear, because the messages are already here
+     before we ever attached a live listener below.
+     It only shows up as a genuine fallback, when the cache hasn't warmed
+     THIS particular chat yet (e.g. a brand new conversation that isn't
+     in the list snapshot yet, or the list simply hasn't finished loading
+     it in the background at the moment of the tap) — and even then it
+     disappears the instant the live listener a few lines down delivers
+     its first snapshot, never lingering after the real messages exist. */
+  if(chatMsgsPrefetchCache[activeChatId]){
+    renderMsgsSnapshot(chatMsgsPrefetchCache[activeChatId]);
+  } else {
+    msgsBox.innerHTML = `<p class="hint-text" style="text-align:center;">جاري تحميل الرسائل...</p>`;
+  }
+
   /* replays whatever snapshot arrived while a finger was held down on a
      bubble, once that hold ends — see the guard in onSnapshot below for
      why this is needed at all. */
@@ -3195,6 +3432,9 @@ async function openChat(peer){
   msgUnsub = db.collection("chats").doc(activeChatId).collection("messages")
     .orderBy("ts","asc")
     .onSnapshot(snap=>{
+      /* keep the prefetch cache in sync with whatever's actually live,
+         so the NEXT time this same chat is opened it's instant too */
+      chatMsgsPrefetchCache[activeChatId] = snap.docs;
       /* a real friend chat marks the peer's messages "read" the instant
          it's opened, which writes back into this very subcollection and
          re-fires this listener seconds later — right as someone is very
@@ -3222,6 +3462,55 @@ async function openChat(peer){
       if(touchHoldActive || reactionUiOpen){ pendingMsgsSnapshot = snap; return; }
       renderMsgsSnapshot(snap);
     }, err=> console.error("messages error", err));
+
+  const chatRef = db.collection("chats").doc(activeChatId);
+  const chatSnap = await chatRef.get();
+  if(chatSnap.exists){
+    chatDocExistsForActive = true;
+    await chatRef.set({
+      participants: chatParticipantsFor(peer),
+      unreadCounts: { [currentUser.id]: 0 }
+    }, {merge:true});
+  }
+  if(peer.isGroup){
+    await preloadGroupMembers(peer);
+    updateGroupOnlineStatus(peer);
+    watchGroupPresence(peer);
+  }
+  frozenChatListPreview = {
+    peerId: peer.id,
+    lastMessage: chatSnap.exists ? (chatSnap.data().lastMessage || "") : "",
+    lastMessageSenderId: chatSnap.exists ? (chatSnap.data().lastMessageSenderId || null) : null,
+    lastMessageStatus: chatSnap.exists ? (chatSnap.data().lastMessageStatus || "sent") : "sent"
+  };
+
+  if(chatDocUnsub) chatDocUnsub();
+  chatDocUnsub = db.collection("chats").doc(activeChatId).onSnapshot(csnap=>{
+    chatDocExistsForActive = csnap.exists;
+    activeChatDocData = csnap.exists ? csnap.data() : null;
+    renderPinnedBanner(csnap.data());
+    if(peer.id === AI_PEER_ID){
+      const typing = !!(csnap.exists && csnap.data().aiTyping);
+      $("#peerStatus").textContent = typing ? "بيكتب..." : "";
+      $("#peerStatus").classList.toggle("hidden", !typing);
+    }else{
+      /* real person on the other end: their typing status is written
+         to their own "typing_<theirId>" field on this same chat doc
+         (see notifyTyping below) — show/hide the dots bubble to match.
+         NOTE: this is intentionally ONE-WAY, not tied to my own
+         "الرسائل المقروءة" toggle — that toggle only stops notifyTyping()
+         from broadcasting MY typing status to them (see the readReceipts
+         check there); it must never stop me from seeing THEIRS. Turning
+         it off means "he can't see me typing", not "we both go blind".
+         Also cached in peerIsTyping so the messages listener below can
+         re-add the bubble after it wipes #messages to redraw. */
+      const iBlockedThemForTyping = Array.isArray(currentUser.blocked) && currentUser.blocked.includes(peer.id);
+      const theyBlockedMeForTyping = !!peerBlockHidden[peer.id];
+      peerIsTyping = !iBlockedThemForTyping && !theyBlockedMeForTyping && !!(csnap.exists && csnap.data()[`typing_${peer.id}`]);
+      if(peerIsTyping) showPeerTypingIndicator(); else removePeerTypingIndicator();
+    }
+  }, err=> console.error("chat doc watch error", err));
+
 }
 
 /* clicking a quoted "replying to" block inside a bubble jumps to the
@@ -6464,6 +6753,7 @@ function openSettings(){
   setAvatarNode($("#settingsAvatarPreview"), currentUser.name, currentUser.photoURL);
   renderLastSeenPrivacyUI();
   $("#readReceiptsToggle").checked = currentUser.readReceipts !== false;
+  renderDevicesPane();
 }
 
 $$(".tab-btn").forEach(btn=>{
@@ -6472,8 +6762,84 @@ $$(".tab-btn").forEach(btn=>{
     $$(".settings-pane").forEach(p=>p.classList.remove("active"));
     btn.classList.add("active");
     $("#pane-"+btn.dataset.tab).classList.add("active");
+    if(btn.dataset.tab === "devices") renderDevicesPane();
   });
 });
+
+/* -- email/account sharing pane -- */
+function renderDevicesPane(){
+  if(!currentUser) return;
+  $("#primaryDeviceBox").classList.toggle("hidden", !isPrimaryDeviceSession);
+  $("#secondaryDeviceBox").classList.toggle("hidden", isPrimaryDeviceSession);
+  if(!isPrimaryDeviceSession) return;
+
+  const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots : [];
+  const filled = slots.filter(s=> s).length;
+
+  const addBtn = $("#addDeviceSlotBtn");
+  addBtn.disabled = slots.length >= MAX_SHARED_SLOTS;
+  $("#deviceSlotsCountText").textContent = `فاتح ${slots.length} من ${MAX_SHARED_SLOTS} أماكن، ${filled} منهم مسجل دخول فعلًا.`;
+
+  const box = $("#linkedDevicesList");
+  if(!slots.length){
+    box.innerHTML = `<p class="hint-text">لسه مفيش أماكن مضافة</p>`;
+    return;
+  }
+  box.innerHTML = "";
+  slots.forEach((dev, idx)=>{
+    const row = document.createElement("div");
+    if(dev){
+      row.className = "device-item";
+      const when = dev.addedAt ? new Date(dev.addedAt).toLocaleDateString("ar-EG") : "";
+      row.innerHTML = `<div class="device-info"><span class="device-name">${escapeHtml(dev.name || "جهاز")}</span><span class="device-added">${escapeHtml(when)}</span></div><button>تسجيل خروج</button>`;
+      row.querySelector("button").addEventListener("click", ()=> logoutDeviceSlot(idx, dev));
+    } else {
+      row.className = "device-item empty-slot";
+      row.innerHTML = `<div class="device-info"><span class="device-name empty">مكان فاضي، محدش سجل عليه لسه</span></div><button>حذف</button>`;
+      row.querySelector("button").addEventListener("click", ()=> deleteEmptySlot(idx));
+    }
+    box.appendChild(row);
+  });
+}
+
+$("#addDeviceSlotBtn").addEventListener("click", async ()=>{
+  if(!currentUser || !isPrimaryDeviceSession) return;
+  const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
+  if(slots.length >= MAX_SHARED_SLOTS){ toast("وصلت للحد الأقصى، 5 أماكن بس ممكن تتفتح", true); return; }
+  try{
+    slots.push(null);
+    await db.collection("users").doc(currentUser.uid).update({ deviceSlots: slots });
+    currentUser.deviceSlots = slots;
+    renderDevicesPane();
+    toast("اتفتح مكان جديد");
+  }catch(e){ console.error(e); toast("حصل خطأ، جرّب تاني", true); }
+});
+
+async function deleteEmptySlot(idx){
+  if(!currentUser || !isPrimaryDeviceSession) return;
+  const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
+  if(slots[idx]) return; /* safety: only empty places can be deleted */
+  try{
+    slots.splice(idx, 1);
+    await db.collection("users").doc(currentUser.uid).update({ deviceSlots: slots });
+    currentUser.deviceSlots = slots;
+    renderDevicesPane();
+  }catch(e){ console.error(e); toast("حصل خطأ، جرّب تاني", true); }
+}
+
+async function logoutDeviceSlot(idx, dev){
+  if(!currentUser || !isPrimaryDeviceSession) return;
+  const ok = await askConfirm("تسجيل الخروج", `تسجّل خروج "${dev.name || "الجهاز ده"}" من حسابك؟`);
+  if(!ok) return;
+  const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
+  try{
+    slots[idx] = null;
+    await db.collection("users").doc(currentUser.uid).update({ deviceSlots: slots });
+    currentUser.deviceSlots = slots;
+    renderDevicesPane();
+    toast("تم تسجيل خروج الجهاز");
+  }catch(e){ console.error(e); toast("حصل خطأ، جرّب تاني", true); }
+}
 
 /* -- profile pane -- */
 let pendingSettingsPhoto = null;
