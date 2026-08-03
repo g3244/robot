@@ -788,20 +788,68 @@ function getDeviceId(){
   }catch(e){ return "d_" + Date.now(); }
 }
 
+/* raw Android model codes (like "SM-G991B") don't say which brand made
+   the phone, so tack the brand name on the front when we recognize the
+   prefix — turns "SM-G991B" into "Samsung SM-G991B", while brands that
+   already put their name in the model string (Infinix, Tecno, Pixel...)
+   are left as-is */
+function prettifyAndroidModel(raw){
+  const known = [
+    [/^SM-|^GT-/i, "Samsung"],
+    [/^(Redmi|Mi[\s-]|POCO)/i, "Xiaomi"],
+    [/^Infinix/i, "Infinix"],
+    [/^Tecno/i, "Tecno"],
+    [/^itel/i, "itel"],
+    [/^vivo/i, "vivo"],
+    [/^OPPO|^CPH\d/i, "OPPO"],
+    [/^realme|^RMX\d/i, "realme"],
+    [/^HUAWEI|^ANE-|^VOG-|^ELS-/i, "Huawei"],
+    [/^HONOR/i, "Honor"],
+    [/^ONEPLUS|^GM\d/i, "OnePlus"],
+    [/^Pixel/i, "Google"],
+    [/^Moto|^XT\d/i, "Motorola"],
+    [/^LG-/i, "LG"],
+    [/^Nokia/i, "Nokia"],
+    [/^ASUS/i, "Asus"],
+    [/^Lenovo/i, "Lenovo"]
+  ];
+  for(const [re, brand] of known){
+    if(re.test(raw)) return raw.toLowerCase().startsWith(brand.toLowerCase()) ? raw : `${brand} ${raw}`;
+  }
+  return raw;
+}
+
 function deviceLabel(){
   const ua = navigator.userAgent || "";
+
+  /* Android UAs usually embed the actual phone model, e.g.
+     "... Android 13; SM-G991B) ..." or "... Android 13; Pixel 7) ..."
+     -> pull that out so the primary sees the real device, not just
+     the word "أندرويد" for every Android phone */
+  const androidModel = ua.match(/Android\s*[\d.]*;\s*([^;)]+?)\s*(?:Build\/[^)]*)?\)/i);
+  if(androidModel && androidModel[1] && !/^wv$/i.test(androidModel[1].trim())){
+    return prettifyAndroidModel(androidModel[1].trim());
+  }
+
   let os = "جهاز غير معروف";
-  if(/Windows/i.test(ua)) os = "ويندوز";
+  if(/iPad/i.test(ua)) os = "آيباد";
+  else if(/iPhone|iPod/i.test(ua)) os = "آيفون";
   else if(/Android/i.test(ua)) os = "أندرويد";
-  else if(/iPhone|iPad|iPod/i.test(ua)) os = "آيفون/آيباد";
   else if(/Macintosh|Mac OS/i.test(ua)) os = "ماك";
+  else if(/Windows/i.test(ua)) os = "ويندوز";
   else if(/Linux/i.test(ua)) os = "لينكس";
+
   let browser = "متصفح";
   if(/Edg\//i.test(ua)) browser = "Edge";
   else if(/OPR\/|Opera/i.test(ua)) browser = "Opera";
   else if(/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) browser = "Chrome";
   else if(/Firefox\//i.test(ua)) browser = "Firefox";
   else if(/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = "Safari";
+
+  /* iPhone/iPad UAs never expose the exact model (Apple hides it), so
+     for those keep the browser name for extra context; other desktop
+     OSes get the same treatment since there's no real device name to
+     read from the browser */
   return `${browser} - ${os}`;
 }
 
@@ -6771,6 +6819,7 @@ function renderDevicesPane(){
   if(!currentUser) return;
   $("#primaryDeviceBox").classList.toggle("hidden", !isPrimaryDeviceSession);
   $("#secondaryDeviceBox").classList.toggle("hidden", isPrimaryDeviceSession);
+  $("#devicesIntroText").classList.toggle("hidden", !isPrimaryDeviceSession);
   if(!isPrimaryDeviceSession) return;
 
   const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots : [];
