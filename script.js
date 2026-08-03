@@ -756,6 +756,7 @@ function onGateSuccess(){
              messages start being hidden going forward, without touching
              anything already in the chat history */
           if(!currentUser.blockedAt) currentUser.blockedAt = {};
+          if(!currentUser.sealedBlocks) currentUser.sealedBlocks = {};
           if(Array.isArray(currentUser.blocked) && currentUser.blocked.length){
             const missing = currentUser.blocked.filter(id=> currentUser.blockedAt[id] == null);
             if(missing.length){
@@ -841,11 +842,11 @@ $("#registerBtn").addEventListener("click", async ()=>{
 
     const profile = {
       id, name, bio: bio || "", photoURL: pendingPhoto || "",
-      blocked: [], pinnedChats: [], savedContacts: [], lastSeenPrivacy: "everyone", readReceipts: true,
+      blocked: [], blockedAt: {}, sealedBlocks: {}, pinnedChats: [], savedContacts: [], lastSeenPrivacy: "everyone", readReceipts: true,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("users").doc(uid).set(profile);
-    currentUser = { uid, ...profile, blocked: [], pinnedChats: [], savedContacts: [] };
+    currentUser = { uid, ...profile, blocked: [], blockedAt: {}, sealedBlocks: {}, pinnedChats: [], savedContacts: [] };
     enterApp();
   }catch(err){
     console.error(err);
@@ -2820,12 +2821,16 @@ async function openChat(peer){
       /* real person on the other end: their typing status is written
          to their own "typing_<theirId>" field on this same chat doc
          (see notifyTyping below) — show/hide the dots bubble to match.
-         Same "it works both ways" rule as read receipts above: if I've
-         turned my own read/typing status off, I don't get to see
-         theirs either. Also cached in peerIsTyping so the messages
-         listener below can re-add the bubble after it wipes #messages
-         to redraw. */
-      peerIsTyping = currentUser.readReceipts !== false && !!(csnap.exists && csnap.data()[`typing_${peer.id}`]);
+         NOTE: this is intentionally ONE-WAY, not tied to my own
+         "الرسائل المقروءة" toggle — that toggle only stops notifyTyping()
+         from broadcasting MY typing status to them (see the readReceipts
+         check there); it must never stop me from seeing THEIRS. Turning
+         it off means "he can't see me typing", not "we both go blind".
+         Also cached in peerIsTyping so the messages listener below can
+         re-add the bubble after it wipes #messages to redraw. */
+      const iBlockedThemForTyping = Array.isArray(currentUser.blocked) && currentUser.blocked.includes(peer.id);
+      const theyBlockedMeForTyping = !!peerBlockHidden[peer.id];
+      peerIsTyping = !iBlockedThemForTyping && !theyBlockedMeForTyping && !!(csnap.exists && csnap.data()[`typing_${peer.id}`]);
       if(peerIsTyping) showPeerTypingIndicator(); else removePeerTypingIndicator();
     }
   }, err=> console.error("chat doc watch error", err));
@@ -2869,19 +2874,19 @@ async function openChat(peer){
         /* messages "deleted for me" stay in Firestore for the other side,
            but must never render on my screen again */
         if(Array.isArray(m.deletedFor) && m.deletedFor.includes(currentUser.id)) return;
-        /* sealed away for me at the moment I unblocked this person —
-           stays hidden forever, independent of my current blocked list */
-        if(Array.isArray(m.blockHiddenFor) && m.blockHiddenFor.includes(currentUser.id)) return;
         /* someone I've blocked messaging me AFTER the block must never
            show up here — leaving and coming back to the chat must not
            let it slip through either, since this filter runs fresh on
            every render (including the very first one when the chat is
-           opened), not just live updates while it happened to be open */
-        if(!isGroupChat && Array.isArray(currentUser.blocked) && currentUser.blocked.includes(m.senderId)){
-          const blockedSince = blockedAtMillis(m.senderId);
-          if(blockedSince !== null){
+           opened). This also stays true AFTER I unblock them: sealedBlocks
+           keeps the same cutoff permanently (see hiddenSinceMillisFor),
+           so those messages don't suddenly reappear the moment the block
+           is lifted. */
+        if(!isGroupChat){
+          const hiddenSince = hiddenSinceMillisFor(m.senderId);
+          if(hiddenSince !== null){
             const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
-            if(msgMillis === null || msgMillis > blockedSince) return;
+            if(msgMillis === null || msgMillis > hiddenSince) return;
           }
         }
         messagesData[doc.id] = m;
@@ -5661,8 +5666,11 @@ $("#scrollToBottomBtn").addEventListener("click", ()=>{
    never before a chat doc actually exists yet — see the "never
    create/resurrect a chat doc just by opening it" note above). Also
    reuses the same "الرسائل المقروءة" privacy toggle that already hides
-   the read tick — turning that off hides BOTH your read status and
-   your typing status from the other person, same idea, one switch.
+   the read tick — turning that off hides your OUTGOING typing status
+   from the other person only. It does NOT affect whether you can see
+   THEIR typing status (that's unconditional — see the chat-doc listener
+   above). One-way on purpose: "he can't see me typing" shouldn't mean
+   "I go blind to him too".
    The "true" write only happens once per typing burst; after that we
    just keep pushing the 2s "stop" timer back on every further keystroke. */
 let iAmTyping = false;
@@ -6176,6 +6184,28 @@ function blockedAtMillis(peerId){
   if(typeof v.seconds === "number") return v.seconds * 1000;
   return null;
 }
+/* Same idea as blockedAtMillis, but for a block that's already been
+   LIFTED. When I unblock someone, unblockId() copies the cutoff into
+   sealedBlocks on MY OWN profile doc (never touching their message
+   docs, which I may not have permission to write) so messages they
+   sent during the block window stay hidden forever, even after the
+   live "currentUser.blocked" check stops applying. */
+function sealedBlockMillis(peerId){
+  if(!currentUser.sealedBlocks) return null;
+  const v = currentUser.sealedBlocks[peerId];
+  if(v == null) return null;
+  if(typeof v === "number") return v;
+  if(typeof v.toMillis === "function") return v.toMillis();
+  if(typeof v.seconds === "number") return v.seconds * 1000;
+  return null;
+}
+/* The single cutoff to use when deciding whether a message from this
+   sender should stay hidden from me: whichever applies, an active
+   block or a sealed (now-lifted) one. */
+function hiddenSinceMillisFor(peerId){
+  const live = blockedAtMillis(peerId);
+  return live !== null ? live : sealedBlockMillis(peerId);
+}
 async function blockId(id){
   if(id === currentUser.id){ toast("متقدرش تحظر نفسك", true); return; }
   try{
@@ -6197,35 +6227,26 @@ async function unblockId(id){
     /* the block was only ever meant to hide what they sent me during
        it, not just delay it — so before removing them from my blocked
        list (which is what the live filter in renderMsgsSnapshot keys
-       off), permanently tag every one of their messages sent during
-       that window as hidden-for-me specifically. Otherwise the moment
-       they're gone from my blocked list, the dynamic filter stops
-       applying and those old messages would suddenly all appear. */
+       off), permanently carry the same cutoff over into sealedBlocks.
+       This is written to MY OWN profile doc only (never touching their
+       message docs — I may well not have permission to edit those),
+       so it can never silently fail to seal like a cross-user write
+       could. Otherwise the moment they're gone from my blocked list,
+       the live filter stops applying and those old messages would
+       suddenly all appear. */
     const blockedSince = blockedAtMillis(id);
-    if(blockedSince !== null){
-      try{
-        const chatId = chatIdFor(currentUser.id, id);
-        const snap = await db.collection("chats").doc(chatId).collection("messages")
-          .where("senderId","==",id).get();
-        const batch = db.batch();
-        let any = false;
-        snap.forEach(doc=>{
-          const m = doc.data();
-          const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
-          if(msgMillis === null || msgMillis > blockedSince){
-            batch.update(doc.ref, { blockHiddenFor: firebase.firestore.FieldValue.arrayUnion(currentUser.id) });
-            any = true;
-          }
-        });
-        if(any) await batch.commit();
-      }catch(e){ console.error("sealing blocked messages failed", e); }
-    }
-    await db.collection("users").doc(currentUser.uid).update({
+    const patch = {
       blocked: firebase.firestore.FieldValue.arrayRemove(id),
       [`blockedAt.${id}`]: firebase.firestore.FieldValue.delete()
-    });
+    };
+    if(blockedSince !== null) patch[`sealedBlocks.${id}`] = blockedSince;
+    await db.collection("users").doc(currentUser.uid).update(patch);
     currentUser.blocked = currentUser.blocked.filter(x=>x!==id);
     if(currentUser.blockedAt) delete currentUser.blockedAt[id];
+    if(blockedSince !== null){
+      if(!currentUser.sealedBlocks) currentUser.sealedBlocks = {};
+      currentUser.sealedBlocks[id] = blockedSince;
+    }
     renderBlockedList();
     updateBlockBanner();
     if(activeChatPeer && activeChatPeer.id === id) refreshPeerUI(id, peerCache[id] || activeChatPeer);
