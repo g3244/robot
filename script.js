@@ -2134,6 +2134,7 @@ function refreshPeerUI(id, data){
     /* Wasla-AI isn't a contact you save/rename — it just has its fixed
        name and description, so hide the save/rename button entirely */
     $("#saveContactBtn").classList.toggle("hidden", id === AI_PEER_ID);
+    updatePeerProfileBlockUI();
   }
 }
 
@@ -2156,16 +2157,53 @@ $("#peerProfileOverlay").addEventListener("click", e=>{
   if(e.target.id === "peerProfileOverlay") closePeerProfile();
 });
 
-/* ---------------- copy peer ID button ---------------- */
-$("#copyPeerIdBtn").addEventListener("click", async (e)=>{
-  e.stopPropagation();
-  if(!peerProfileOpenId) return;
+/* ---------------- group member quick-peek sheet ----------------
+   Opened by tapping a member's small avatar next to their message in
+   a group chat. Deliberately separate from peerProfileOpenId/the
+   modal above — this is a lighter, ephemeral peek that doesn't touch
+   activeChatPeer or any watch/subscription state; bio is shown inline
+   here instead of handing off to the full modal. */
+let memberPeekId = null;
+function openMemberPeek(senderId){
+  if(!senderId || senderId === currentUser.id) return;
+  const data = peerCache[senderId] || groupMemberInfo(senderId);
+  memberPeekId = senderId;
+  setAvatarNode($("#memberPeekAvatarBig"), data.name, data.photoURL || "");
+  $("#memberPeekName").textContent = resolveDisplayName(senderId, data.name);
+  $("#memberPeekId").textContent = data.id || senderId;
+  $("#memberPeekBio").textContent = (data.bio && data.bio.trim()) ? data.bio : "مفيش نبذة";
+  $("#memberPeekOverlay").classList.toggle("peer-saved", isSavedContact(senderId));
+  $("#memberPeekOverlay").classList.remove("mp-hidden");
+}
+function closeMemberPeek(){
+  memberPeekId = null;
+  $("#memberPeekOverlay").classList.add("mp-hidden");
+  $("#memberPeekOverlay").classList.remove("peer-saved");
+  $("#memberPeekSheet").classList.remove("avatar-zoomed");
+}
+$("#messages").addEventListener("click", e=>{
+  const avatarEl = e.target.closest(".msg-group-avatar");
+  if(avatarEl && avatarEl.dataset.senderId) openMemberPeek(avatarEl.dataset.senderId);
+});
+$("#memberPeekOverlay").addEventListener("click", e=>{
+  if(e.target.id === "memberPeekOverlay") closeMemberPeek();
+});
+$("#memberPeekChatBtn").addEventListener("click", ()=>{
+  if(!memberPeekId) return;
+  const data = peerCache[memberPeekId] || groupMemberInfo(memberPeekId);
+  const id = memberPeekId;
+  closeMemberPeek();
+  openChat({ id, name: data.name, photoURL: data.photoURL, uid: data.uid, blocked: data.blocked });
+});
+/* ---------------- copy ID button (shared helper) ---------------- */
+async function copyIdToClipboard(id){
+  if(!id) return;
   try{
-    await navigator.clipboard.writeText(peerProfileOpenId);
+    await navigator.clipboard.writeText(id);
   }catch(err){
     try{
       const ta = document.createElement("textarea");
-      ta.value = peerProfileOpenId;
+      ta.value = id;
       ta.style.position = "fixed"; ta.style.opacity = "0";
       document.body.appendChild(ta); ta.select();
       document.execCommand("copy");
@@ -2173,7 +2211,35 @@ $("#copyPeerIdBtn").addEventListener("click", async (e)=>{
     }catch(err2){ console.error(err2); toast("مقدرش أنسخ الأيدي", true); return; }
   }
   toast("اتنسخ الأيدي");
+}
+$("#copyPeerIdBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  copyIdToClipboard(peerProfileOpenId);
 });
+$("#copyMemberPeekIdBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  copyIdToClipboard(memberPeekId);
+});
+
+/* ---------------- member-peek avatar: full lightbox on desktop,
+   in-place zoom on mobile (so the enlarged photo grows inside the
+   sheet instead of covering it with a separate overlay) ---------------- */
+$("#memberPeekAvatarBig").addEventListener("click", ()=>{
+  const img = $("#memberPeekAvatarImg");
+  if(img.classList.contains("hidden") || !img.src) return;
+  if(window.matchMedia("(min-width:768px)").matches){
+    openLightbox(img.src);
+  }else{
+    $("#memberPeekSheet").classList.toggle("avatar-zoomed");
+  }
+});
+
+/* The member-peek handle (the little gray bar at the top of the sheet)
+   is purely decorative — it just grows a bit on press via CSS
+   (.member-peek-handle:active) as a visual affordance, with no drag
+   behavior attached to it. */
+
+
 
 /* ---------------- fullscreen image lightbox ---------------- */
 function openLightbox(src){
@@ -2538,12 +2604,32 @@ async function markMessagesDeliveredForChat(chatId, peerId, chatData){
      every single chat-list refresh */
   if(!chatData || chatData.lastMessageSenderId !== peerId || chatData.lastMessageStatus !== "sent") return;
   try{
+    /* same cutoff used to keep block-window messages hidden from me
+       (see hiddenSinceMillisFor) — reused here so their tick status is
+       just as permanently frozen as their visibility: a message sent
+       during a block window must never turn blue/grey-double, even
+       long after I've unblocked them. Unlike the plain "currently
+       blocked" check above, this survives unblocking. */
+    const sealedCutoff = hiddenSinceMillisFor(peerId);
     const snap = await db.collection("chats").doc(chatId).collection("messages")
       .where("senderId","==",peerId).where("status","==","sent").get();
     if(snap.empty) return;
     const batch = db.batch();
-    snap.forEach(doc=> batch.update(doc.ref, { status: "delivered" }));
-    batch.set(db.collection("chats").doc(chatId), { lastMessageStatus: "delivered" }, {merge:true});
+    let any = false, lastOneAdvanced = false;
+    snap.forEach(doc=>{
+      const m = doc.data();
+      if(sealedCutoff !== null){
+        const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
+        if(msgMillis === null || msgMillis > sealedCutoff) return; // frozen at "sent" forever
+      }
+      batch.update(doc.ref, { status: "delivered" });
+      any = true;
+      if(chatData.lastMessageId && doc.id === chatData.lastMessageId) lastOneAdvanced = true;
+    });
+    if(!any) return;
+    if(lastOneAdvanced || !chatData.lastMessageId){
+      batch.set(db.collection("chats").doc(chatId), { lastMessageStatus: "delivered" }, {merge:true});
+    }
     await batch.commit();
   }catch(e){ console.error("mark delivered failed", e); }
 }
@@ -2572,9 +2658,18 @@ async function markPeerMessagesRead(snapDocs, peerId){
      point on — it never touches anything already marked "read" before
      the toggle changed (see displayStatus above). */
   if(currentUser.readReceipts === false) return;
+  /* same permanent cutoff as markMessagesDeliveredForChat above — a
+     message sent during a block window (active or since-lifted) must
+     stay frozen at "sent" and never reach "read" either. */
+  const sealedCutoff = hiddenSinceMillisFor(peerId);
   const unread = snapDocs.filter(doc=>{
     const m = doc.data();
-    return m.senderId === peerId && m.status !== "read";
+    if(m.senderId !== peerId || m.status === "read") return false;
+    if(sealedCutoff !== null){
+      const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
+      if(msgMillis === null || msgMillis > sealedCutoff) return false;
+    }
+    return true;
   });
   if(!unread.length) return;
   try{
@@ -2582,8 +2677,11 @@ async function markPeerMessagesRead(snapDocs, peerId){
     unread.forEach(doc=> batch.update(doc.ref, { status: "read" }));
     await batch.commit();
     /* if the peer's message was also the chat's last message, flip the
-       chat-list tick (on their side) to blue/read too */
-    if(chatDocExistsForActive && activeChatId && activeChatDocData && activeChatDocData.lastMessageSenderId === peerId){
+       chat-list tick (on their side) to blue/read too — but only if
+       THAT specific message actually just got marked read above, not
+       just because some other, earlier, non-sealed message did */
+    if(chatDocExistsForActive && activeChatId && activeChatDocData && activeChatDocData.lastMessageSenderId === peerId
+       && unread.some(doc=> doc.id === activeChatDocData.lastMessageId)){
       db.collection("chats").doc(activeChatId).set({
         lastMessageStatus: "read"
       }, {merge:true}).catch(()=>{});
@@ -2968,6 +3066,7 @@ async function openChat(peer){
           row.className = "msg-group-row";
           const avatarWrap = document.createElement("div");
           avatarWrap.className = "avatar msg-group-avatar";
+          avatarWrap.dataset.senderId = m.senderId;
           avatarWrap.innerHTML = "<span></span><img class=\"hidden\">";
           setAvatarNode(avatarWrap, sender.name, sender.photoURL);
           if(!m.deletedForEveryone){
@@ -5905,8 +6004,7 @@ function insertEmojiIntoComposer(emoji){
     clearTimeout(draftSaveTimer);
     draftSaveTimer = setTimeout(()=>{ setDraftText(activeChatId, ta.value); }, 150);
   }
-  saveRecentEmoji(emoji);
-  if(activeEmojiCat === "recent") renderEmojiCategory("recent");
+  if(activeEmojiCat !== "recent") saveRecentEmoji(emoji);
 }
 
 function renderEmojiTabs(){
@@ -6033,8 +6131,10 @@ $("#emojiPanelBody").addEventListener("click", (e)=>{
   if(!btn) return;
   if(emojiPanelReactionMode){
     if(reactionBarMsgId) applyReaction(reactionBarMsgId, btn.dataset.emoji);
-    saveRecentEmoji(btn.dataset.emoji);
-    bumpQuickReaction(btn.dataset.emoji);
+    if(activeEmojiCat !== "recent"){
+      saveRecentEmoji(btn.dataset.emoji);
+      bumpQuickReaction(btn.dataset.emoji);
+    }
     return;
   }
   insertEmojiIntoComposer(btn.dataset.emoji);
@@ -6156,7 +6256,7 @@ $("#composer").addEventListener("submit", async (e)=>{
 /* =====================================================================
    7) BLOCK / UNBLOCK
    ===================================================================== */
-$("#blockBtn").addEventListener("click", async ()=>{
+async function toggleBlockForActivePeer(){
   if(!activeChatPeer) return;
   const isBlocked = (currentUser.blocked || []).includes(activeChatPeer.id);
   if(isBlocked){
@@ -6168,6 +6268,41 @@ $("#blockBtn").addEventListener("click", async ()=>{
     if(!ok) return;
     await blockId(activeChatPeer.id);
   }
+  updatePeerProfileBlockUI();
+}
+$("#blockBtn").addEventListener("click", toggleBlockForActivePeer);
+/* same action as the header icon above, just surfaced as a full-width
+   button at the bottom of the "معلومات المستخدم" page too, since that's
+   where people actually go looking for it */
+function updatePeerProfileBlockUI(){
+  if(!peerProfileOpenId) return;
+  const btn = $("#peerProfileBlockBtn");
+  btn.classList.toggle("hidden", peerProfileOpenId === AI_PEER_ID);
+  const isBlocked = (currentUser.blocked || []).includes(peerProfileOpenId);
+  btn.classList.toggle("is-blocked", isBlocked);
+  $("#peerProfileBlockBtnLabel").textContent = isBlocked ? "إلغاء الحظر" : "حظر المستخدم";
+}
+$("#peerProfileBlockBtn").addEventListener("click", async ()=>{
+  if(!peerProfileOpenId) return;
+  /* the profile overlay can be opened for a peer that isn't the
+     currently-open chat (e.g. from a friends-list row), so borrow
+     activeChatPeer's id only when it matches — otherwise fall back to
+     a minimal peer object built from what the profile already has on
+     screen, same shape toggleBlockForActivePeer/blockId/unblockId need */
+  const peerForBlock = (activeChatPeer && activeChatPeer.id === peerProfileOpenId)
+    ? activeChatPeer
+    : { id: peerProfileOpenId, name: $("#peerProfileName").textContent };
+  const isBlocked = (currentUser.blocked || []).includes(peerForBlock.id);
+  if(isBlocked){
+    const ok = await askConfirm("إلغاء الحظر", `تلغي حظر ${peerDisplayName(peerForBlock)}؟`);
+    if(!ok) return;
+    await unblockId(peerForBlock.id);
+  } else {
+    const ok = await askConfirm("حظر المستخدم", "هل تريد حظر هذا الشخص؟");
+    if(!ok) return;
+    await blockId(peerForBlock.id);
+  }
+  updatePeerProfileBlockUI();
 });
 
 /* the moment I block someone, anything they send AFTER that point must
