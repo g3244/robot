@@ -1370,7 +1370,8 @@ async function renderChatList(rawDocs){
           ${unread > 0 ? `<span class="unread-badge">${unread > 99 ? "99+" : unread}</span>` : ""}
         </div>
       </div>`;
-    setAvatarNode(item.querySelector(`#ci-${peerId}`), chatListDisplayName(peer), peer.photoURL);
+    if(!isGroup && theyBlockedMeFromData(peer)) peerBlockHidden[peerId] = true;
+    setAvatarNode(item.querySelector(`#ci-${peerId}`), chatListDisplayName(peer), (!isGroup && peerBlockHidden[peerId]) ? "" : peer.photoURL);
     item.addEventListener("click", ()=>{
       /* swallow the synthetic click that follows a long-press on touch
          devices, same idea as the message bubbles' long-press handling */
@@ -1660,10 +1661,11 @@ function buildFriendItem(peer, entry){
     <div class="fi-info">
       <strong>${escapeHtml(shownText)}</strong>
     </div>`;
-  setAvatarNode(item.querySelector(`#fi-${peer.id}`), peer.name, peer.photoURL);
+  if(theyBlockedMeFromData(peer)) peerBlockHidden[peer.id] = true;
+  setAvatarNode(item.querySelector(`#fi-${peer.id}`), peer.name, peerBlockHidden[peer.id] ? "" : peer.photoURL);
   item.addEventListener("click", ()=>{
     closeFriendsPage();
-    openChat({ id: peer.id, name: peer.name, photoURL: peer.photoURL, uid: peer.uid });
+    openChat({ id: peer.id, name: peer.name, photoURL: peer.photoURL, uid: peer.uid, blocked: peer.blocked });
   });
   return item;
 }
@@ -1931,6 +1933,16 @@ const peerBlockTimers = {}; // peerId -> pending setTimeout handle
 const peerBlockHidden = {}; // peerId -> true once photo should be hidden
 const peerFirstSnapshotSeen = {}; // peerId -> true once we've received at least one snapshot since watchPeer started
 let peerProfileOpenId = null;
+/* Reads "have they blocked me" straight off a peer object that was
+   already fetched a moment ago for the chat list / friends page (that
+   fetch pulls the peer's full profile doc, "blocked" field included).
+   Used to paint an avatar already-hidden on the very first frame,
+   instead of showing the real photo for a beat while the dedicated
+   watchPeer listener makes its own separate round trip to find out the
+   same thing — that gap was the last source of the photo flash. */
+function theyBlockedMeFromData(peerObj){
+  return !!(peerObj && Array.isArray(peerObj.blocked) && peerObj.blocked.includes(currentUser.id));
+}
 
 /* Fetches every group member's profile once (skipping ones already in
    peerCache / me) so the message list can look a sender up
@@ -2735,7 +2747,8 @@ async function openChat(peer){
   $("#peerProfileTrigger").classList.toggle("peer-saved", isGroupOrAi || isSavedContact(peer.id));
   $("#peerStatus").textContent = "";
   $("#peerStatus").classList.toggle("hidden", !peer.isGroup);
-  setAvatarNode($("#peerAvatar"), peerDisplayName(peer), peer.photoURL);
+  if(!peer.isGroup && theyBlockedMeFromData(peer)) peerBlockHidden[peer.id] = true;
+  setAvatarNode($("#peerAvatar"), peerDisplayName(peer), (!peer.isGroup && peerBlockHidden[peer.id]) ? "" : peer.photoURL);
   setWallpaperCSS($("#messages"), localStorage.getItem(prefKey("wallpaper")) || "");
 
   $$(".chat-item").forEach(n=>n.classList.remove("active"));
@@ -2856,6 +2869,9 @@ async function openChat(peer){
         /* messages "deleted for me" stay in Firestore for the other side,
            but must never render on my screen again */
         if(Array.isArray(m.deletedFor) && m.deletedFor.includes(currentUser.id)) return;
+        /* sealed away for me at the moment I unblocked this person —
+           stays hidden forever, independent of my current blocked list */
+        if(Array.isArray(m.blockHiddenFor) && m.blockHiddenFor.includes(currentUser.id)) return;
         /* someone I've blocked messaging me AFTER the block must never
            show up here — leaving and coming back to the chat must not
            let it slip through either, since this filter runs fresh on
@@ -6178,6 +6194,32 @@ async function blockId(id){
 }
 async function unblockId(id){
   try{
+    /* the block was only ever meant to hide what they sent me during
+       it, not just delay it — so before removing them from my blocked
+       list (which is what the live filter in renderMsgsSnapshot keys
+       off), permanently tag every one of their messages sent during
+       that window as hidden-for-me specifically. Otherwise the moment
+       they're gone from my blocked list, the dynamic filter stops
+       applying and those old messages would suddenly all appear. */
+    const blockedSince = blockedAtMillis(id);
+    if(blockedSince !== null){
+      try{
+        const chatId = chatIdFor(currentUser.id, id);
+        const snap = await db.collection("chats").doc(chatId).collection("messages")
+          .where("senderId","==",id).get();
+        const batch = db.batch();
+        let any = false;
+        snap.forEach(doc=>{
+          const m = doc.data();
+          const msgMillis = (m.ts && typeof m.ts.toMillis === "function") ? m.ts.toMillis() : null;
+          if(msgMillis === null || msgMillis > blockedSince){
+            batch.update(doc.ref, { blockHiddenFor: firebase.firestore.FieldValue.arrayUnion(currentUser.id) });
+            any = true;
+          }
+        });
+        if(any) await batch.commit();
+      }catch(e){ console.error("sealing blocked messages failed", e); }
+    }
     await db.collection("users").doc(currentUser.uid).update({
       blocked: firebase.firestore.FieldValue.arrayRemove(id),
       [`blockedAt.${id}`]: firebase.firestore.FieldValue.delete()
