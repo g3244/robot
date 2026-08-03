@@ -1929,6 +1929,7 @@ $("#ngdJoinApprovalToggle").addEventListener("change", e=>{
 const peerDocUnsubs = {};   // peerId -> Firestore unsubscribe fn
 const peerBlockTimers = {}; // peerId -> pending setTimeout handle
 const peerBlockHidden = {}; // peerId -> true once photo should be hidden
+const peerFirstSnapshotSeen = {}; // peerId -> true once we've received at least one snapshot since watchPeer started
 let peerProfileOpenId = null;
 
 /* Fetches every group member's profile once (skipping ones already in
@@ -1958,7 +1959,9 @@ function watchPeer(peer){
     const data = { ...snap.data(), id: peer.id, uid: snap.id };
     peerCache[peer.id] = data;
     const blockedMe = Array.isArray(data.blocked) && data.blocked.includes(currentUser.id);
-    handleBlockedVisibility(peer.id, blockedMe);
+    const isFirstSnapshot = !peerFirstSnapshotSeen[peer.id];
+    peerFirstSnapshotSeen[peer.id] = true;
+    handleBlockedVisibility(peer.id, blockedMe, isFirstSnapshot);
     refreshPeerUI(peer.id, data);
   }, err=> console.error("peer watch error", err));
 }
@@ -1966,6 +1969,7 @@ function unwatchPeer(id){
   if(peerDocUnsubs[id]){ peerDocUnsubs[id](); delete peerDocUnsubs[id]; }
   if(peerBlockTimers[id]){ clearTimeout(peerBlockTimers[id]); delete peerBlockTimers[id]; }
   delete peerBlockHidden[id];
+  delete peerFirstSnapshotSeen[id];
 }
 function unwatchAllPeers(){
   Object.keys(peerDocUnsubs).forEach(unwatchPeer);
@@ -2027,10 +2031,20 @@ function unwatchGroupPresence(groupId){
   delete groupPresenceUnsubs[groupId];
 }
 
-/* Delays hiding the photo by ~3s after a block is detected, and restores
-   it immediately the moment the block is lifted. */
-function handleBlockedVisibility(id, blockedMe){
+/* Delays hiding the photo/status by ~3s after a block is detected DURING
+   an active session (so the person being blocked doesn't see it vanish
+   the instant it happens — that instant disappearance would itself be
+   a tell). But on a fresh page load / refresh, there's no "before" to
+   compare against — the block is already an established fact the first
+   time we hear about it — so that first snapshot must apply it right
+   away instead of showing the photo/status for 3 more seconds first. */
+function handleBlockedVisibility(id, blockedMe, isFirstSnapshot){
   if(blockedMe){
+    if(isFirstSnapshot){
+      if(peerBlockTimers[id]){ clearTimeout(peerBlockTimers[id]); peerBlockTimers[id] = null; }
+      peerBlockHidden[id] = true;
+      return;
+    }
     if(!peerBlockHidden[id] && !peerBlockTimers[id]){
       peerBlockTimers[id] = setTimeout(()=>{
         peerBlockHidden[id] = true;
