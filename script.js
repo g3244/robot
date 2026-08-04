@@ -8,6 +8,51 @@ const FIREBASE_CONFIG = {
   measurementId: "G-1JX6487N9T"
 };
 
+/* =====================================================================
+   Cloudinary — where every image, voice-note, and generic file the user
+   sends actually lands (Firestore still holds the message docs/metadata
+   exactly as before; only the raw bytes moved off Firebase Storage).
+   Unsigned upload preset, so this can be called straight from the
+   browser with no backend. resource_type "auto" lets Cloudinary sort
+   images vs audio/video vs raw files out on its own.
+
+   uploadToCloudinary() returns { promise, cancel() } — shaped just
+   enough like the old Firebase UploadTask that callers (progress ring,
+   × cancel button) didn't need to change: `await task.promise` resolves
+   to Cloudinary's response object (use .secure_url), and task.cancel()
+   aborts the in-flight upload (rejects with err.code ===
+   "cloudinary/canceled", mirroring the old "storage/canceled"). ---- */
+const CLOUDINARY_CLOUD_NAME = "j3crbzfv";
+const CLOUDINARY_UPLOAD_PRESET = "Wasla_uploads";
+
+function uploadToCloudinary(file, { folder, onProgress } = {}){
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise((resolve, reject)=>{
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`);
+    xhr.upload.addEventListener("progress", (e)=>{
+      if(onProgress && e.lengthComputable) onProgress(e.loaded / e.total * 100);
+    });
+    xhr.onload = ()=>{
+      if(xhr.status >= 200 && xhr.status < 300){
+        try{ resolve(JSON.parse(xhr.responseText)); }
+        catch(err){ reject(err); }
+      } else {
+        let msg = "Cloudinary upload failed (" + xhr.status + ")";
+        try{ msg = JSON.parse(xhr.responseText).error.message || msg; }catch(e){}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = ()=> reject(new Error("Cloudinary network error"));
+    xhr.onabort = ()=>{ const err = new Error("cloudinary/canceled"); err.code = "cloudinary/canceled"; reject(err); };
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    if(folder) formData.append("folder", folder);
+    xhr.send(formData);
+  });
+  return { promise, cancel(){ try{ xhr.abort(); }catch(e){} } };
+}
+
 let db = null, auth = null, storage = null, firebaseReady = false;
 try{
   const hasRealKey = !!FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.trim() !== "" && !FIREBASE_CONFIG.apiKey.includes("YOUR_");
@@ -6101,11 +6146,10 @@ async function stopAndSendVoice(){
   appendPendingVoiceBubble(tempId, durationSec);
 
   try{
-    if(!storage) throw new Error("Firebase Storage غير مهيأ");
     const ext = mimeType.includes("mp4") ? "m4a" : (mimeType.includes("ogg") ? "ogg" : "webm");
-    const ref = storage.ref(`voice/${activeChatId}/${tempId}.${ext}`);
-    await ref.put(blob, { contentType: mimeType });
-    const url = await ref.getDownloadURL();
+    const voiceFile = new File([blob], `${tempId}.${ext}`, { type: mimeType });
+    const data = await uploadToCloudinary(voiceFile, { folder: `voice/${activeChatId}` }).promise;
+    const url = data.secure_url;
 
     const isAiChat = activeChatPeer.id === AI_PEER_ID;
     const msgPayload = {
@@ -6376,17 +6420,13 @@ async function sendImageFile(file){
   const localUrl = URL.createObjectURL(file);
   appendPendingImageBubble(tempId, localUrl);
   try{
-    if(!storage) throw new Error("Firebase Storage غير مهيأ");
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const ref = storage.ref(`images/${activeChatId}/${tempId}.${ext}`);
-    const task = ref.put(file, { contentType: file.type || "image/jpeg" });
-    imageUploadTasks.set(tempId, task);
-    task.on("state_changed", (snap)=>{
-      const pct = snap.totalBytes ? (snap.bytesTransferred / snap.totalBytes * 100) : 0;
-      updateUploadRingDOM(tempId, pct);
+    const task = uploadToCloudinary(file, {
+      folder: `images/${activeChatId}`,
+      onProgress: (pct)=> updateUploadRingDOM(tempId, pct)
     });
-    await task;
-    const url = await ref.getDownloadURL();
+    imageUploadTasks.set(tempId, task);
+    const data = await task.promise;
+    const url = data.secure_url;
     markImageUploadDone(tempId, url);
 
     const isAiChat = activeChatPeer.id === AI_PEER_ID;
@@ -6413,7 +6453,7 @@ async function sendImageFile(file){
     chatDocExistsForActive = true;
   }catch(err){
     removePendingMessageBubble(tempId);
-    if(!(err && err.code === "storage/canceled")){
+    if(!(err && err.code === "cloudinary/canceled")){
       console.error(err);
       toast("تعذر إرسال الصورة", true);
     }
@@ -6428,10 +6468,8 @@ async function sendGenericFile(file){
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   appendPendingFileBubble(tempId, file.name, file.size);
   try{
-    if(!storage) throw new Error("Firebase Storage غير مهيأ");
-    const ref = storage.ref(`files/${activeChatId}/${tempId}_${file.name}`);
-    await ref.put(file, { contentType: file.type || "application/octet-stream" });
-    const url = await ref.getDownloadURL();
+    const data = await uploadToCloudinary(file, { folder: `files/${activeChatId}` }).promise;
+    const url = data.secure_url;
 
     const isAiChat = activeChatPeer.id === AI_PEER_ID;
     const msgPayload = {
