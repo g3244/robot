@@ -1178,6 +1178,7 @@ async function logout(){
     stopPresenceTracking();
     if(chatListUnsub){ chatListUnsub(); chatListUnsub = null; }
     if(msgUnsub){ msgUnsub(); msgUnsub = null; }
+    if(chatDocUnsub){ chatDocUnsub(); chatDocUnsub = null; }
     if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
     unwatchAllPeers();
     stopWatchingOwnDevice();
