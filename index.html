@@ -1700,6 +1700,18 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   </div>
 </div>
 
+<!-- ---- Rename-device prompt, used from the devices pane so the
+     primary device can fix an auto-detected name (or just type one in
+     when auto-detection isn't possible on that browser) ---- -->
+<div class="delete-overlay hidden" id="renamePromptOverlay">
+  <div class="delete-panel">
+    <h3 id="renamePromptTitle">اسم الجهاز</h3>
+    <input type="text" id="renamePromptInput" maxlength="40" style="width:100%;box-sizing:border-box;padding:10px;margin:8px 0;border-radius:8px;border:1px solid var(--border-color,#ccc);font-size:15px;" />
+    <button type="button" class="secondary-btn" id="renamePromptSaveBtn">حفظ</button>
+    <button type="button" class="secondary-btn" id="renamePromptCancelBtn">إلغاء</button>
+  </div>
+</div>
+
 <!-- ---- Delete choice modal (delete for me / delete for everyone) ---- -->
 <div class="delete-overlay hidden" id="deleteOverlay">
   <div class="delete-panel">

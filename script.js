@@ -819,15 +819,32 @@ function prettifyAndroidModel(raw){
   return raw;
 }
 
-function deviceLabel(){
+async function deviceLabel(){
   const ua = navigator.userAgent || "";
 
-  /* Android UAs usually embed the actual phone model, e.g.
-     "... Android 13; SM-G991B) ..." or "... Android 13; Pixel 7) ..."
-     -> pull that out so the primary sees the real device, not just
-     the word "أندرويد" for every Android phone */
+  /* Modern Chrome on Android "freezes" the classic UA string and no
+     longer puts the real phone model in it (it's replaced with a
+     generic placeholder like "K"), so reading navigator.userAgent
+     alone now shows every Android phone as just "Chrome - أندرويد".
+     Chromium still exposes the real model through the User-Agent
+     Client Hints API — ask for it first and prefer it when present. */
+  if(navigator.userAgentData && navigator.userAgentData.getHighEntropyValues){
+    try{
+      const hints = await navigator.userAgentData.getHighEntropyValues(["model"]);
+      if(hints && hints.model && hints.model.trim()){
+        return prettifyAndroidModel(hints.model.trim());
+      }
+    }catch(e){ /* fall through to the UA-string based detection below */ }
+  }
+
+  /* fallback for browsers without Client Hints (older Chrome, Firefox,
+     Safari, desktop...): Android UAs there usually still embed the
+     actual phone model, e.g. "... Android 13; SM-G991B) ..." or
+     "... Android 13; Pixel 7) ..." -> pull that out so the primary
+     sees the real device, not just the word "أندرويد" for every
+     Android phone */
   const androidModel = ua.match(/Android\s*[\d.]*;\s*([^;)]+?)\s*(?:Build\/[^)]*)?\)/i);
-  if(androidModel && androidModel[1] && !/^wv$/i.test(androidModel[1].trim())){
+  if(androidModel && androidModel[1] && !/^wv$/i.test(androidModel[1].trim()) && !/^K$/i.test(androidModel[1].trim())){
     return prettifyAndroidModel(androidModel[1].trim());
   }
 
@@ -845,6 +862,11 @@ function deviceLabel(){
   else if(/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) browser = "Chrome";
   else if(/Firefox\//i.test(ua)) browser = "Firefox";
   else if(/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = "Safari";
+
+  /* couldn't detect anything real at all — never leave it blank, show
+     a plain generic placeholder instead; the primary can always fix
+     it with the "تغيير الاسم" button next to it in the devices list */
+  if(os === "جهاز غير معروف" && browser === "متصفح") return "جهاز جديد";
 
   /* iPhone/iPad UAs never expose the exact model (Apple hides it), so
      for those keep the browser name for extra context; other desktop
@@ -904,7 +926,7 @@ async function claimOrCheckDeviceAccess(uid, data){
      the primary made room for */
   const emptyIdx = deviceSlots.findIndex(s=> !s);
   if(emptyIdx !== -1){
-    const entry = { deviceId, name: deviceLabel(), addedAt: Date.now() };
+    const entry = { deviceId, name: await deviceLabel(), addedAt: Date.now() };
     const nextSlots = deviceSlots.slice();
     nextSlots[emptyIdx] = entry;
     await userRef.update({ deviceSlots: nextSlots });
@@ -4157,6 +4179,43 @@ $("#simpleConfirmOverlay").addEventListener("click", (e)=>{
 });
 
 /* =====================================================================
+   6.2c) GENERIC TEXT-INPUT PROMPT MODAL — same idea as askConfirm()
+   above but collects a typed value instead of yes/no. Used to rename a
+   device slot: auto-detecting the exact phone model from the browser
+   isn't reliable everywhere (Chrome hides it on Android for privacy,
+   and other browsers like Firefox/Samsung Internet never expose it at
+   all), so — same as WhatsApp Web / Google's "your devices" page — the
+   primary device gets a best-effort suggested name up front and can
+   always type in the real one by hand. Resolves the typed string, or
+   null if the person cancels. */
+let simplePromptResolve = null;
+function askPrompt(title, defaultValue){
+  return new Promise(resolve=>{
+    simplePromptResolve = resolve;
+    $("#renamePromptTitle").textContent = title;
+    const input = $("#renamePromptInput");
+    input.value = defaultValue || "";
+    $("#renamePromptOverlay").classList.remove("hidden");
+    setTimeout(()=>{ input.focus(); input.select(); }, 0);
+  });
+}
+function closeSimplePrompt(result){
+  $("#renamePromptOverlay").classList.add("hidden");
+  if(simplePromptResolve){ simplePromptResolve(result); simplePromptResolve = null; }
+}
+$("#renamePromptSaveBtn").addEventListener("click", ()=>{
+  const val = $("#renamePromptInput").value.trim();
+  closeSimplePrompt(val || null);
+});
+$("#renamePromptCancelBtn").addEventListener("click", ()=> closeSimplePrompt(null));
+$("#renamePromptOverlay").addEventListener("click", (e)=>{
+  if(e.target.id === "renamePromptOverlay") closeSimplePrompt(null);
+});
+$("#renamePromptInput").addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){ e.preventDefault(); $("#renamePromptSaveBtn").click(); }
+});
+
+/* =====================================================================
    6.3) DELETE-CHOICE MODAL (delete for me / delete for everyone)
    Accepts an array of ids so the same modal covers both a single
    right-clicked message and a multi-select bulk delete.
@@ -6840,8 +6899,9 @@ function renderDevicesPane(){
     if(dev){
       row.className = "device-item";
       const when = dev.addedAt ? new Date(dev.addedAt).toLocaleDateString("ar-EG") : "";
-      row.innerHTML = `<div class="device-info"><span class="device-name">${escapeHtml(dev.name || "جهاز")}</span><span class="device-added">${escapeHtml(when)}</span></div><button>تسجيل خروج</button>`;
-      row.querySelector("button").addEventListener("click", ()=> logoutDeviceSlot(idx, dev));
+      row.innerHTML = `<div class="device-info"><span class="device-name">${escapeHtml(dev.name || "جهاز جديد")}<button class="rename-device-btn" title="تغيير الاسم"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></span><span class="device-added">${escapeHtml(when)}</span></div><button class="logout-device-btn">تسجيل خروج</button>`;
+      row.querySelector(".rename-device-btn").addEventListener("click", ()=> renameDeviceSlot(idx, dev));
+      row.querySelector(".logout-device-btn").addEventListener("click", ()=> logoutDeviceSlot(idx, dev));
     } else {
       row.className = "device-item empty-slot";
       row.innerHTML = `<div class="device-info"><span class="device-name empty">مكان فاضي، محدش سجل عليه لسه</span></div><button>حذف</button>`;
@@ -6870,6 +6930,24 @@ async function deleteEmptySlot(idx){
   if(slots[idx]) return; /* safety: only empty places can be deleted */
   try{
     slots.splice(idx, 1);
+    await db.collection("users").doc(currentUser.uid).update({ deviceSlots: slots });
+    currentUser.deviceSlots = slots;
+    renderDevicesPane();
+  }catch(e){ console.error(e); toast("حصل خطأ، جرّب تاني", true); }
+}
+
+/* lets the primary device fix a slot's name by hand — the auto-detected
+   label (Client Hints model, or the UA-string guess) is only ever a
+   best-effort suggestion, so this is the reliable fallback every real
+   multi-device UI (WhatsApp Web, Google account devices...) leans on. */
+async function renameDeviceSlot(idx, dev){
+  if(!currentUser || !isPrimaryDeviceSession) return;
+  const newName = await askPrompt("غيّر اسم الجهاز", dev.name || "");
+  if(newName === null || newName === (dev.name || "")) return;
+  try{
+    const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
+    if(!slots[idx]) return;
+    slots[idx] = { ...slots[idx], name: newName };
     await db.collection("users").doc(currentUser.uid).update({ deviceSlots: slots });
     currentUser.deviceSlots = slots;
     renderDevicesPane();

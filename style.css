@@ -1160,6 +1160,9 @@ input,textarea{font-family:inherit;}
 .device-item .device-name.empty{color:var(--ink-dim); font-weight:500;}
 .device-item .device-added{font-size:11px; color:var(--ink-dim);}
 .device-item button{background:none; border:none; color:var(--error); font-size:12px; font-weight:700; font-family:var(--font-body); direction:rtl; flex-shrink:0; cursor:pointer;}
+.device-item{flex-wrap:wrap;}
+.device-item .rename-device-btn{color:inherit; opacity:.7; background:none; border:none; padding:0 2px; margin-inline-start:5px; cursor:pointer; display:inline-flex; align-items:center; vertical-align:middle;}
+.device-item .rename-device-btn:hover{opacity:1;}
 
 /* =====================================================================
    4.5) PEER PROFILE MODAL + FULLSCREEN IMAGE LIGHTBOX
