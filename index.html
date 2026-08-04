@@ -233,7 +233,7 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   .tsg-brand-features .tsg-dot{width:6px; height:6px; border-radius:50%; background:var(--accent); flex-shrink:0;}
 }
 </style>
-<link rel="stylesheet" href="style.css?v=20260804e">
+<link rel="stylesheet" href="style.css?v=20260804l">
 </head>
 <body>
 
@@ -1152,6 +1152,23 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
             </label>
             <input type="color" id="customColorInput" value="#f2b134">
           </div>
+
+          <div class="verified-color-block hidden" id="verifiedColorBlock">
+            <h3>لون علامة التوثيق <span class="verified-badge-inline" id="verifiedColorPreview"></span></h3>
+            <div class="color-grid" id="verifiedColorGrid"></div>
+          </div>
+
+          <div class="custom-theme-section">
+            <h3>مظهر خاص</h3>
+            <p class="hint-text">اعمل مظهر بالألوان اللي إنت عايزها بالظبط: ألوان الرسائل، الأزرار، الخلفية والإنبوت.</p>
+            <div class="custom-theme-btn-row">
+              <button type="button" class="secondary-btn" id="openThemeEditorBtn">عمل مظهر خاص</button>
+              <button type="button" class="secondary-btn" id="cancelCustomThemeBtn">إلغاء التطبيق الخاص</button>
+            </div>
+
+            <div class="custom-theme-list" id="customThemeList"></div>
+            <p class="hint-text" id="customThemeEmpty">لسه معملتش أي مظهر خاص</p>
+          </div>
         </div>
 
         <div class="settings-pane" id="pane-wallpaper">
@@ -1760,23 +1777,98 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   </div>
 </div>
 
+<!-- ---- Custom theme editor: opened from "عمل مظهر خاص" inside appearance
+     settings. Lets the person pick message colors, button color, background
+     color and input color separately, then save it as a named theme that
+     shows up as a card at the bottom of the appearance pane. ---- -->
+<div class="theme-editor-overlay hidden" id="themeEditorOverlay">
+  <div class="theme-editor-panel">
+    <div class="theme-editor-head">
+      <h3>مظهر خاص</h3>
+      <button type="button" class="icon-btn" id="closeThemeEditor">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="hint-text">حدد اللون، وهتشوف الشكل بيتغير على طول.</p>
+
+    <h4>ألوان الرسائل</h4>
+    <div class="custom-color-row">
+      <label class="custom-color-label" for="themeMsgOutInput"><span class="custom-color-swatch" id="themeMsgOutSwatch"></span> لون رسايلي</label>
+      <input type="color" id="themeMsgOutInput" class="native-color-picker" value="#2a3550">
+    </div>
+    <div class="custom-color-row">
+      <label class="custom-color-label" for="themeMsgInInput"><span class="custom-color-swatch" id="themeMsgInSwatch"></span> لون رسايل التاني</label>
+      <input type="color" id="themeMsgInInput" class="native-color-picker" value="#182238">
+    </div>
+
+    <h4>لون الأزرار</h4>
+    <div class="custom-color-row">
+      <label class="custom-color-label" for="themeBtnInput"><span class="custom-color-swatch" id="themeBtnSwatch"></span> لون الأزرار</label>
+      <input type="color" id="themeBtnInput" class="native-color-picker" value="#f2b134">
+    </div>
+
+    <h4>لون الخلفية</h4>
+    <div class="custom-color-row">
+      <label class="custom-color-label" for="themeBgInput"><span class="custom-color-swatch" id="themeBgSwatch"></span> لون الخلفية</label>
+      <input type="color" id="themeBgInput" class="native-color-picker" value="#0a0f1c">
+    </div>
+
+    <h4>لون الإنبوت</h4>
+    <div class="custom-color-row">
+      <label class="custom-color-label" for="themeInputInput"><span class="custom-color-swatch" id="themeInputSwatch"></span> لون الإنبوت</label>
+      <input type="color" id="themeInputInput" class="native-color-picker" value="#141c2c">
+    </div>
+
+    <div class="field">
+      <label>اسم المظهر</label>
+      <input type="text" id="themeNameInput" maxlength="24" placeholder="اكتب اسم للمظهر">
+    </div>
+    <p class="auth-error" id="themeEditorMsg"></p>
+    <button type="button" class="primary-btn" id="createThemeBtn">إنشاء</button>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast hidden" id="toast"></div>
 
-<!-- ---- Blank admin page: table of everyone who reacted to a Wasla AI
-     reply, with their ID, which reaction they gave, their opinion, and
-     their suggestions. Not linked from anywhere in the normal UI — open
-     it by going to the site URL with #ai-feedback-table at the end. ---- -->
+<!-- ---- Blank admin page: not linked from anywhere in the normal UI —
+     open it by going to the site URL with #ai-feedback-table at the
+     end. Has two tabs:
+       1) "رأي استخدام الذكاء الاصطناعي" — table of everyone who reacted
+          to a Wasla AI reply, with their ID, reaction, opinion, tips.
+       2) "علامة توثيق" — every user + group ID with a toggle button to
+          grant/revoke their blue verified badge. ---- -->
 <section id="aiFeedbackPage" class="admin-page hidden">
   <div class="admin-page-inner">
-    <h2>آراء المستخدمين في Wasla AI</h2>
-    <table class="admin-table">
-      <thead>
-        <tr><th>الأيدي</th><th>التقييم</th><th>الرأي</th><th>نصايح</th></tr>
-      </thead>
-      <tbody id="aiFeedbackTableBody"></tbody>
-    </table>
-    <p class="hint-text hidden" id="aiFeedbackEmpty">لسه معدش حد بعت رأيه.</p>
+
+    <div class="admin-tabs">
+      <button type="button" class="admin-tab-btn active" id="adminTabOpinionBtn">رأي استخدام الذكاء الاصطناعي</button>
+      <button type="button" class="admin-tab-btn" id="adminTabVerifyBtn">علامة توثيق</button>
+    </div>
+
+    <div id="adminOpinionView">
+      <h2>آراء المستخدمين في Wasla AI</h2>
+      <table class="admin-table">
+        <thead>
+          <tr><th>الأيدي</th><th>التقييم</th><th>الرأي</th><th>نصايح</th></tr>
+        </thead>
+        <tbody id="aiFeedbackTableBody"></tbody>
+      </table>
+      <p class="hint-text hidden" id="aiFeedbackEmpty">لسه معدش حد بعت رأيه.</p>
+    </div>
+
+    <div id="adminVerifyView" class="hidden">
+      <h2>توثيق مستخدم أو مجموعة</h2>
+      <p class="hint-text">اكتب الأيدي ودوس توثيق. من غير ما تظهر بيانات أي حد بيسجل في التطبيق.</p>
+      <div class="verify-add-row">
+        <input type="text" id="verifyIdInput" placeholder="اكتب الأيدي هنا">
+        <button type="button" id="verifyAddBtn" class="verify-action-btn grant">توثيق</button>
+      </div>
+      <p class="hint-text" id="verifyActionStatus"></p>
+      <p class="hint-text" id="verifyListLoading">جاري تحميل الأيديهات الموثّقة...</p>
+      <div class="admin-verify-list" id="verifyIdsList"></div>
+    </div>
+
   </div>
 </section>
 
@@ -1822,6 +1914,6 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js" defer></script>
 
-<script src="script.js?v=20260804e" defer></script>
+<script src="script.js?v=20260804l" defer></script>
 </body>
 </html>

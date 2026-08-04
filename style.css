@@ -284,9 +284,10 @@ input,textarea{font-family:inherit;}
 .avatar-picker{display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:18px;}
 .avatar-preview{
   width:84px; height:84px; border-radius:50%; background:var(--input-bg); border:2px dashed var(--card-border);
-  display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--ink-dim); overflow:hidden;
+  display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--ink-dim); overflow:visible;
+  position:relative;
 }
-.avatar-preview img{width:100%; height:100%; object-fit:cover;}
+.avatar-preview img{width:100%; height:100%; object-fit:cover; border-radius:50%;}
 /* الحرف الافتراضي جوه دايرة الصورة كان نازل شوية لتحت بسبب ارتفاع السطر
    الافتراضي؛ بنظبطه في النص بالظبط. */
 .avatar-preview span{line-height:1; display:inline-block;}
@@ -378,11 +379,32 @@ input,textarea{font-family:inherit;}
 
 .avatar{
   width:44px; height:44px; border-radius:50%; background:var(--input-bg); flex-shrink:0;
-  display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--ink-muted); overflow:hidden; position:relative;
+  display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--ink-muted); overflow:visible; position:relative;
 }
-.avatar img{width:100%; height:100%; object-fit:cover;}
+/* border-radius moved onto the <img> itself (instead of relying on the
+   container's overflow:hidden) so the verified badge below can sit half
+   on / half off the circle's edge without getting clipped */
+.avatar img{width:100%; height:100%; object-fit:cover; border-radius:50%;}
 .avatar.sm{width:40px; height:40px; font-size:14px;}
 .avatar span{line-height:1; display:inline-block;}
+
+/* ---- Verified badge: small blue scalloped seal + checkmark, sitting
+   half on / half off the bottom-right edge of an avatar. Added/removed
+   from JS with applyVerifiedBadge(), granted from the #ai-feedback-table
+   admin page's "علامة توثيق" tab. ---- */
+.verified-badge{
+  position:absolute; right:-3px; bottom:-3px; width:16px; height:16px;
+  display:block; pointer-events:none; z-index:2; filter:drop-shadow(0 0 1px rgba(0,0,0,.35));
+}
+.verified-badge svg{width:100%; height:100%; display:block;}
+.avatar.sm .verified-badge{width:14px; height:14px; right:-2px; bottom:-2px;}
+.profile-avatar-big .verified-badge{width:28px; height:28px; right:2px; bottom:6px;}
+.verify-row-avatar .verified-badge{width:15px; height:15px; right:-2px; bottom:-2px;}
+.avatar-preview .verified-badge{width:18px; height:18px; right:calc(14.6% - 9px); bottom:calc(14.6% - 9px);}
+.member-peek-avatar .verified-badge{width:22px; height:22px; right:1px; bottom:5px;}
+/* hide the badge on the enlarged/zoomed avatar view — it should only
+   ever show on the small avatar thumbnail inside the peek sheet */
+.member-peek-sheet.avatar-zoomed .member-peek-avatar .verified-badge{display:none;}
 
 .icon-btn{
   width:36px; height:36px; border-radius:10px; background:var(--input-bg); border:1px solid var(--card-border);
@@ -565,6 +587,7 @@ input,textarea{font-family:inherit;}
   align-self:flex-end;
 }
 .msg-group-avatar{width:24px; height:24px; font-size:10px; margin-bottom:2px; cursor:pointer;}
+.msg-group-avatar .verified-badge{width:11px; height:11px; right:-2px; bottom:-2px;}
 .msg-group-sender{
   display:block; font-size:12px; font-weight:700; color:var(--chat-accent); margin-bottom:2px; line-height:1.3;
 }
@@ -1061,6 +1084,47 @@ input,textarea{font-family:inherit;}
 .admin-table td.fb-id{font-family:var(--font-mono); direction:ltr; text-align:right; white-space:nowrap;}
 .admin-table td.fb-reaction{font-size:16px; text-align:center;}
 
+/* ---- admin page tabs ---- */
+.admin-tabs{display:flex; gap:8px; margin-bottom:22px; border-bottom:1px solid var(--card-border); padding-bottom:0;}
+.admin-tab-btn{
+  background:none; border:none; color:var(--ink-muted); font-family:inherit; font-size:14px; font-weight:700;
+  padding:10px 4px 12px; cursor:pointer; position:relative; transition:.15s;
+}
+.admin-tab-btn + .admin-tab-btn{margin-inline-start:14px;}
+.admin-tab-btn:hover{color:var(--ink);}
+.admin-tab-btn.active{color:var(--brand, #5b8def);}
+.admin-tab-btn.active::after{
+  content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--brand, #5b8def); border-radius:2px;
+}
+#adminOpinionView.hidden, #adminVerifyView.hidden{display:none;}
+
+/* ---- admin "علامة توثيق" tab: search box + scrollable list of every
+   user/group ID with a toggle button ---- */
+.verify-add-row{display:flex; gap:10px; margin-bottom:10px;}
+.verify-add-row input{
+  flex:1; min-width:0; border:1px solid var(--card-border); background:var(--input-bg); color:var(--ink);
+  font-family:var(--font-mono); direction:ltr; text-align:right; font-size:14px; border-radius:10px; padding:11px 14px;
+}
+.verify-action-btn{
+  flex-shrink:0; border:1px solid var(--card-border); background:var(--input-bg); color:var(--ink);
+  font-family:inherit; font-size:13.5px; font-weight:700; border-radius:10px; padding:11px 18px; cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.verify-action-btn:hover{filter:brightness(1.08);}
+.verify-action-btn:disabled{opacity:.6; cursor:default;}
+.verify-action-btn.grant{background:rgba(79,195,247,.14); border-color:#4fc3f7; color:#4fc3f7;}
+.admin-verify-list{display:flex; flex-direction:column; gap:8px; margin-top:10px;}
+.verify-id-row{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  border:1px solid var(--card-border); background:var(--input-bg); border-radius:10px; padding:10px 14px;
+}
+.verify-id-text{font-family:var(--font-mono); direction:ltr; text-align:right; font-size:14px; font-weight:700; color:var(--ink);}
+.verify-remove-btn{
+  flex-shrink:0; border:1px solid #f05a5a; background:rgba(240,90,90,.1); color:#f05a5a;
+  font-family:inherit; font-size:12.5px; font-weight:700; border-radius:8px; padding:7px 12px; cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.verify-remove-btn:hover{filter:brightness(1.1);}
+.verify-remove-btn:disabled{opacity:.6; cursor:default;}
+
 
 /* =====================================================================
    4) SETTINGS PANEL — custom-built, not a bare icon
@@ -1100,16 +1164,68 @@ input,textarea{font-family:inherit;}
 .theme-swatch.light{background:linear-gradient(135deg,#fff,#e8ecf5); border:1px solid rgba(0,0,0,.08);}
 .theme-swatch.dark{background:linear-gradient(135deg,#141c30,#0a0f1c); border:1px solid rgba(255,255,255,.08);}
 
-.color-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:10px;}
-.color-swatch{aspect-ratio:1; border-radius:50%; border:2px solid transparent; cursor:pointer; transition:.15s;}
+.color-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:10px; justify-items:center;}
+.color-swatch{width:44px; height:30px; border-radius:8px; border:2px solid transparent; cursor:pointer; transition:.15s;}
 .color-swatch.active{border-color:var(--ink); transform:scale(1.1);}
 
 .custom-color-row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:14px; padding:10px 12px; border-radius:12px; background:var(--input-bg); border:1.5px solid var(--card-border);}
 .custom-color-label{display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink); cursor:pointer;}
 .custom-color-swatch{width:24px; height:24px; border-radius:50%; border:2px solid var(--card-border); flex-shrink:0;}
-#customColorInput{-webkit-appearance:none; appearance:none; width:34px; height:34px; border:none; border-radius:8px; background:none; cursor:pointer; padding:0;}
-#customColorInput::-webkit-color-swatch-wrapper{padding:0;}
-#customColorInput::-webkit-color-swatch{border-radius:8px; border:1.5px solid var(--card-border);}
+.verified-color-block{margin-top:22px; padding-top:18px; border-top:1px solid var(--card-border);}
+.verified-color-block h3{display:flex; align-items:center; gap:8px;}
+.verified-badge-inline{position:relative; display:inline-block; width:18px; height:18px;}
+.verified-badge-inline svg{width:100%; height:100%; display:block;}
+.verified-badge-inline .verified-badge{position:static; right:auto; bottom:auto; width:100%; height:100%;}
+#customColorInput, .native-color-picker{-webkit-appearance:none; appearance:none; width:34px; height:34px; border:none; border-radius:8px; background:none; cursor:pointer; padding:0; flex-shrink:0;}
+#customColorInput::-webkit-color-swatch-wrapper, .native-color-picker::-webkit-color-swatch-wrapper{padding:0;}
+#customColorInput::-webkit-color-swatch, .native-color-picker::-webkit-color-swatch{border-radius:8px; border:1.5px solid var(--card-border);}
+
+/* ---- "مظهر خاص" (custom theme) block at the bottom of the appearance
+   pane: launcher button + the list of saved custom themes, each shown
+   as a rectangle with an اسم, an "تطبيق" button and a delete button ---- */
+.custom-theme-section{margin-top:22px; padding-top:18px; border-top:1px solid var(--card-border);}
+.custom-theme-btn-row{display:flex; gap:8px;}
+.custom-theme-btn-row .secondary-btn{cursor:pointer;}
+#cancelCustomThemeBtn{color:var(--error); border-color:var(--error-soft);}
+#cancelCustomThemeBtn:hover, #cancelCustomThemeBtn:active{background:var(--error-soft); border-color:var(--error); color:var(--error);}
+.custom-theme-list{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
+.custom-theme-card{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background:var(--input-bg); border:1.5px solid var(--card-border); border-radius:12px; padding:10px 12px;
+  transition:.15s;
+}
+.custom-theme-card.active{border-color:var(--chat-accent);}
+.custom-theme-name{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:700; color:var(--ink); min-width:0;}
+.custom-theme-name span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.custom-theme-dot{width:14px; height:14px; border-radius:50%; flex-shrink:0; border:1.5px solid var(--card-border);}
+.custom-theme-actions{display:flex; align-items:center; gap:6px; flex-shrink:0;}
+.custom-theme-apply-btn{
+  background:var(--accent-soft); color:var(--chat-accent); border:1px solid var(--accent-soft); border-radius:9px;
+  font-size:12.5px; font-weight:700; padding:7px 12px; cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.custom-theme-apply-btn:hover{filter:brightness(1.08);}
+.custom-theme-apply-btn.applied{background:var(--chat-accent); color:var(--chat-accent-ink); border-color:var(--chat-accent);}
+.custom-theme-delete-btn{
+  width:32px; height:32px; border-radius:9px; background:transparent; border:1px solid var(--card-border);
+  color:var(--ink-muted); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; flex-shrink:0;
+}
+.custom-theme-delete-btn:hover{color:var(--error); border-color:var(--error-soft); background:var(--error-soft);}
+
+/* ---- Custom theme editor overlay: opened from the "عمل مظهر خاص"
+   button, sits above the settings overlay so it reads as its own page ---- */
+.theme-editor-overlay{
+  position:fixed; inset:0; z-index:175; background:rgba(6,9,16,.55); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:20px; transition:opacity .2s;
+}
+.theme-editor-overlay.hidden{opacity:0; pointer-events:none;}
+.theme-editor-panel{
+  width:100%; max-width:420px; max-height:88vh; overflow-y:auto; background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:18px; box-shadow:var(--shadow); padding:22px 20px; animation: modalIn .25s cubic-bezier(.2,.8,.2,1);
+}
+.theme-editor-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
+.theme-editor-head h3{margin:0; font-size:16px;}
+.theme-editor-panel h4{margin:18px 0 8px; font-size:12.5px; color:var(--ink-muted); font-weight:700;}
+.theme-editor-panel h4:first-of-type{margin-top:14px;}
 
 .privacy-opt-group{display:flex; gap:8px; margin-bottom:18px;}
 .privacy-opt{flex:1; padding:10px 6px; border-radius:12px; background:var(--input-bg); border:1.5px solid var(--card-border); color:var(--ink-muted); font-size:12.5px; font-weight:600; cursor:pointer; transition:.15s;}
@@ -1181,10 +1297,10 @@ input,textarea{font-family:inherit;}
 .profile-avatar-big{
   width:120px; height:120px; border-radius:50%; background:var(--input-bg); border:none; padding:0;
   display:flex; align-items:center; justify-content:center; font-size:38px; font-weight:700; color:var(--ink-muted);
-  overflow:hidden; cursor:pointer; flex-shrink:0; margin-bottom:16px; transition:.15s; font-family:var(--font-body);
+  overflow:visible; cursor:pointer; flex-shrink:0; margin-bottom:16px; transition:.15s; font-family:var(--font-body); position:relative;
 }
 .profile-avatar-big:hover{filter:brightness(1.06); transform:scale(1.02);}
-.profile-avatar-big img{width:100%; height:100%; object-fit:cover;}
+.profile-avatar-big img{width:100%; height:100%; object-fit:cover; border-radius:50%;}
 /* Name/ID prominence swap: by default (a stranger I haven't saved) the
    ID is the big/primary line and the name sits small underneath it.
    Once I save them under my own chosen name, that name becomes the
@@ -1250,14 +1366,15 @@ input,textarea{font-family:inherit;}
 .member-peek-avatar{
   width:96px; height:96px; border-radius:50%; background:var(--input-bg); border:none; padding:0;
   display:flex; align-items:center; justify-content:center; font-size:32px; font-weight:700; color:var(--ink-muted);
-  overflow:hidden; flex-shrink:0; margin-bottom:14px; font-family:var(--font-body);
+  overflow:visible; flex-shrink:0; margin-bottom:14px; font-family:var(--font-body); position:relative;
   cursor:pointer; transition:transform .2s cubic-bezier(.2,.8,.2,1), width .3s cubic-bezier(.2,.8,.2,1), height .3s cubic-bezier(.2,.8,.2,1), border-radius .3s;
 }
 .member-peek-avatar:hover{transform:scale(1.08);}
-.member-peek-avatar img{width:100%; height:100%; object-fit:cover;}
+.member-peek-avatar img{width:100%; height:100%; object-fit:cover; border-radius:50%; transition:border-radius .3s;}
 .member-peek-sheet.avatar-zoomed .member-peek-avatar{
   width:100%; height:auto; aspect-ratio:1/1; max-width:280px; border-radius:20px;
 }
+.member-peek-sheet.avatar-zoomed .member-peek-avatar img{border-radius:20px;}
 .member-peek-sheet.avatar-zoomed .member-peek-avatar:hover{transform:none;}
 .member-peek-title-block{display:flex; flex-direction:column; align-items:center; text-align:center; gap:3px; margin-bottom:14px;}
 /* Same prominence-swap idea as the full profile modal: a stranger's ID
@@ -1672,12 +1789,13 @@ input,textarea{font-family:inherit;}
 }
 
 /* scrollbars */
-.chat-list::-webkit-scrollbar, .messages::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .composer-pill textarea::-webkit-scrollbar, .emoji-panel-body::-webkit-scrollbar, .poll-body::-webkit-scrollbar::-webkit-scrollbar, .friends-body::-webkit-scrollbar, .member-peek-sheet::-webkit-scrollbar{width:6px;}
-.chat-list::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .composer-pill textarea::-webkit-scrollbar-thumb, .emoji-panel-body::-webkit-scrollbar-thumb, .poll-body::-webkit-scrollbar-thumb::-webkit-scrollbar-thumb, .friends-body::-webkit-scrollbar-thumb, .member-peek-sheet::-webkit-scrollbar-thumb{background:var(--scrollbar); border-radius:6px;}
-.chat-list::-webkit-scrollbar-track, .messages::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .composer-pill textarea::-webkit-scrollbar-track, .emoji-panel-body::-webkit-scrollbar-track, .poll-body::-webkit-scrollbar-track::-webkit-scrollbar-track, .friends-body::-webkit-scrollbar-track, .member-peek-sheet::-webkit-scrollbar-track{background:transparent;}
+.chat-list::-webkit-scrollbar, .messages::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .composer-pill textarea::-webkit-scrollbar, .emoji-panel-body::-webkit-scrollbar, .poll-body::-webkit-scrollbar::-webkit-scrollbar, .friends-body::-webkit-scrollbar, .member-peek-sheet::-webkit-scrollbar, .admin-page::-webkit-scrollbar, .theme-editor-panel::-webkit-scrollbar{width:6px;}
+.chat-list::-webkit-scrollbar-thumb, .messages::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .composer-pill textarea::-webkit-scrollbar-thumb, .emoji-panel-body::-webkit-scrollbar-thumb, .poll-body::-webkit-scrollbar-thumb::-webkit-scrollbar-thumb, .friends-body::-webkit-scrollbar-thumb, .member-peek-sheet::-webkit-scrollbar-thumb, .admin-page::-webkit-scrollbar-thumb, .theme-editor-panel::-webkit-scrollbar-thumb{background:var(--scrollbar); border-radius:6px;}
+.chat-list::-webkit-scrollbar-track, .messages::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .composer-pill textarea::-webkit-scrollbar-track, .emoji-panel-body::-webkit-scrollbar-track, .poll-body::-webkit-scrollbar-track::-webkit-scrollbar-track, .friends-body::-webkit-scrollbar-track, .member-peek-sheet::-webkit-scrollbar-track, .admin-page::-webkit-scrollbar-track, .theme-editor-panel::-webkit-scrollbar-track{background:transparent;}
 /* just the thumb, no up/down arrow buttons at the ends */
-.chat-list::-webkit-scrollbar-button, .messages::-webkit-scrollbar-button, .settings-body::-webkit-scrollbar-button, .composer-pill textarea::-webkit-scrollbar-button, .emoji-panel-body::-webkit-scrollbar-button, .poll-body::-webkit-scrollbar-button::-webkit-scrollbar-button, .friends-body::-webkit-scrollbar-button, .member-peek-sheet::-webkit-scrollbar-button{display:none; width:0; height:0;}
-.chat-list, .messages, .settings-body, .composer-pill textarea, .emoji-panel-body, .poll-body, .friends-body, .member-peek-sheet{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+.chat-list::-webkit-scrollbar-button, .messages::-webkit-scrollbar-button, .settings-body::-webkit-scrollbar-button, .composer-pill textarea::-webkit-scrollbar-button, .emoji-panel-body::-webkit-scrollbar-button, .poll-body::-webkit-scrollbar-button::-webkit-scrollbar-button, .friends-body::-webkit-scrollbar-button, .member-peek-sheet::-webkit-scrollbar-button, .admin-page::-webkit-scrollbar-button, .theme-editor-panel::-webkit-scrollbar-button{display:none; width:0; height:0;}
+.chat-list, .messages, .settings-body, .composer-pill textarea, .emoji-panel-body, .poll-body, .friends-body, .member-peek-sheet, .admin-page, .theme-editor-panel{scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;}
+
 
 
 /* settings tabs: keep scrollable (swipe/wheel still works), just hide the scrollbar itself */

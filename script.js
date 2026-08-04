@@ -136,6 +136,10 @@ let chatListSelectionActive = false;
 let chatLongPressFired = false;
 
 const ACCENTS = ["#f2b134","#5eead4","#f472b6","#93c5fd","#4ade80","#fb923c","#c084fc","#fb7185","#60a5fa","#facc15","#34d399","#a78bfa"];
+/* colors a VERIFIED account can pick for its own blue-seal badge, from
+   the appearance pane — grid built by buildVerifiedColorGrid(), only
+   ever shown/enabled for someone whose own account has `verified:true` */
+const VERIFIED_COLORS = ["#4fc3f7","#f2b134","#ffd54f","#c0c0c0","#a78bfa","#4ade80","#fb7185","#f472b6"];
 const WALLPAPERS = [
   {id:"none",  css:"none"},
   {id:"dots",  css:"radial-gradient(currentColor 1px, transparent 1px)", size:"16px 16px", tint:true},
@@ -199,6 +203,31 @@ function setAvatarNode(node, name, photoURL){
   } else {
     if(img) img.classList.add("hidden");
     if(span){ span.textContent = initials(name); span.classList.remove("hidden"); }
+  }
+}
+
+/* ---- verified badge (blue scalloped seal + checkmark), overlaid half
+   on / half off the bottom-right edge of an avatar. Granted per user or
+   per group from the /#ai-feedback-table admin page's "علامة توثيق"
+   tab, stored as a `verified` boolean on the user's/group's Firestore
+   doc, and simply carried along wherever that doc's data already flows
+   (peerCache, currentUser, chat-list rows, etc). ---- */
+function verifiedBadgeSVG(color){
+  const c = color || "#4fc3f7";
+  return `<span class="verified-badge" title="حساب موثّق">`+
+    `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">`+
+    `<path fill="${c}" d="M12.0 1.6 9.75 3.6 6.8 2.99 5.85 5.85 2.99 6.8 3.6 9.75 1.6 12.0 3.6 14.25 2.99 17.2 5.85 18.15 6.8 21.01 9.75 20.4 12.0 22.4 14.25 20.4 17.2 21.01 18.15 18.15 21.01 17.2 20.4 14.25 22.4 12.0 20.4 9.75 21.01 6.8 18.15 5.85 17.2 2.99 14.25 3.6Z"/>`+
+    `<path fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" d="M8.2 12.3l2.4 2.4 5.2-5.6"/>`+
+    `</svg></span>`;
+}
+function applyVerifiedBadge(node, verified, color){
+  if(!node) return;
+  const existing = node.querySelector(".verified-badge");
+  if(verified){
+    if(existing) existing.remove(); // rebuild so a changed color is picked up, not just first-grant
+    node.insertAdjacentHTML("beforeend", verifiedBadgeSVG(color));
+  } else if(existing){
+    existing.remove();
   }
 }
 
@@ -1146,6 +1175,8 @@ function resetUIAfterAuthEnd(){
   currentUser = null; activeChatPeer = null; activeChatId = null;
   closePeerProfile();
   closeLightbox();
+  _adminCheckCache = null; // clear cached admin status so the NEXT login gets a fresh check
+  $("#aiFeedbackPage").classList.add("hidden");
 
   $("#settingsOverlay").classList.add("hidden");
   $("#app").classList.add("hidden");
@@ -1370,6 +1401,11 @@ function enterApp(){
   $("#myName").textContent = currentUser.name;
   $("#myIdDisplay").textContent = "ID: " + currentUser.id;
   setAvatarNode($("#myAvatar"), currentUser.name, currentUser.photoURL);
+  applyVerifiedBadge($("#myAvatar"), !!currentUser.verified, currentUser.verifiedColor);
+  /* currentUser just became available — re-check the admin-page gate in
+     case #ai-feedback-table was already in the address bar (e.g. a saved
+     bookmark) before login finished. Safe no-op if that's not the page. */
+  if(typeof syncAiFeedbackPageWithHash === "function") syncAiFeedbackPageWithHash();
 
   loadLocalPrefs();
   buildColorGrid();
@@ -1461,6 +1497,13 @@ function loadLocalPrefs(){
   applyAccent(accent);
   applyWallpaper(wallpaper);
   applyLayoutMode(layoutMode);
+
+  // re-apply a saved custom theme (مظهر خاص) if the person had one active
+  const activeId = localStorage.getItem(prefKey("customThemeActive")) || "";
+  if(activeId){
+    const t = loadCustomThemes().find(x=>x.id===activeId);
+    if(t) applyCustomTheme(t, true);
+  }
 }
 function applyTheme(theme){
   document.documentElement.setAttribute("data-theme", theme);
@@ -1481,7 +1524,7 @@ function applyLayoutMode(mode){
 function applyAccent(hex){
   document.documentElement.style.setProperty("--chat-accent", hex);
   localStorage.setItem(prefKey("accent"), hex);
-  $$(".color-swatch").forEach(s=> s.classList.toggle("active", s.dataset.color === hex));
+  $$("#colorGrid .color-swatch").forEach(s=> s.classList.toggle("active", s.dataset.color === hex));
   const customInput = $("#customColorInput"), customSwatch = $("#customColorSwatch");
   if(customInput) customInput.value = hex;
   if(customSwatch) customSwatch.style.background = hex;
@@ -1547,6 +1590,7 @@ async function searchById(){
       <div class="sr-info"><strong>${escapeHtml(peer.name)}</strong><span>${peer.id}</span></div>
       <button id="srOpenBtn">دردشة</button>`;
     setAvatarNode($("#srAvatar"), peer.name, peer.photoURL);
+    applyVerifiedBadge($("#srAvatar"), !!peer.verified, peer.verifiedColor);
     $("#srOpenBtn").addEventListener("click", ()=> openChat(peer));
   }catch(err){
     console.error(err);
@@ -1650,7 +1694,7 @@ async function renderChatList(rawDocs){
     if(!peerId) return null;
     let peer;
     if(isGroup){
-      peer = { id: doc.id, isGroup:true, name: data.groupName || "مجموعة", photoURL: data.groupPhotoURL || "", members: data.participants.slice() };
+      peer = { id: doc.id, isGroup:true, name: data.groupName || "مجموعة", photoURL: data.groupPhotoURL || "", members: data.participants.slice(), verified: !!data.verified, verifiedColor: data.verifiedColor };
       peerCache[peerId] = peer;
     } else {
       peer = peerCache[peerId];
@@ -1716,6 +1760,7 @@ async function renderChatList(rawDocs){
       </div>`;
     if(!isGroup && theyBlockedMeFromData(peer)) peerBlockHidden[peerId] = true;
     setAvatarNode(item.querySelector(`#ci-${peerId}`), chatListDisplayName(peer), (!isGroup && peerBlockHidden[peerId]) ? "" : peer.photoURL);
+    applyVerifiedBadge(item.querySelector(`#ci-${peerId}`), !!peer.verified, peer.verifiedColor);
     item.addEventListener("click", ()=>{
       /* swallow the synthetic click that follows a long-press on touch
          devices, same idea as the message bubbles' long-press handling */
@@ -2021,6 +2066,7 @@ function buildFriendItem(peer, entry){
     </div>`;
   if(theyBlockedMeFromData(peer)) peerBlockHidden[peer.id] = true;
   setAvatarNode(item.querySelector(`#fi-${peer.id}`), peer.name, peerBlockHidden[peer.id] ? "" : peer.photoURL);
+  applyVerifiedBadge(item.querySelector(`#fi-${peer.id}`), !!peer.verified, peer.verifiedColor);
   item.addEventListener("click", ()=>{
     closeFriendsPage();
     openChat({ id: peer.id, name: peer.name, photoURL: peer.photoURL, uid: peer.uid, blocked: peer.blocked });
@@ -2080,6 +2126,7 @@ function buildNgpItem(peer, entry){
     <div class="fi-info"><strong>${escapeHtml(shownText)}</strong></div>
     ${ngpFriendItemHTML()}`;
   setAvatarNode(item.querySelector(`#ngp-${peer.id}`), peer.name, peer.photoURL);
+  applyVerifiedBadge(item.querySelector(`#ngp-${peer.id}`), !!peer.verified, peer.verifiedColor);
   // Reflect any selection made in a previous visit to this list (e.g.
   // coming back via "إضافة" from the group-details page), instead of
   // always starting unchecked.
@@ -2327,7 +2374,8 @@ function watchPeer(peer){
   peerDocUnsubs[peer.id] = db.collection("users").doc(peer.uid).onSnapshot(snap=>{
     if(!snap.exists) return;
     const data = { ...snap.data(), id: peer.id, uid: snap.id };
-    peerCache[peer.id] = data;
+    Object.assign(peer, data); // keep this exact object live too, not just peerCache — anything (e.g. a chat-list row's click closure) still holding this same reference gets the update for free
+    peerCache[peer.id] = peer;
     const blockedMe = Array.isArray(data.blocked) && data.blocked.includes(currentUser.id);
     const isFirstSnapshot = !peerFirstSnapshotSeen[peer.id];
     peerFirstSnapshotSeen[peer.id] = true;
@@ -2437,7 +2485,7 @@ function refreshPeerUI(id, data){
   const displayPhoto = hidePhoto ? "" : (data.photoURL || "");
 
   const ciNode = document.querySelector(`#ci-${id}`);
-  if(ciNode) setAvatarNode(ciNode, chatListDisplayName(data), displayPhoto);
+  if(ciNode){ setAvatarNode(ciNode, chatListDisplayName(data), displayPhoto); applyVerifiedBadge(ciNode, !!data.verified, data.verifiedColor); }
   const ciStrong = ciNode && ciNode.parentElement && ciNode.parentElement.querySelector(".ci-info strong");
   if(ciStrong) ciStrong.textContent = chatListDisplayName(data);
 
@@ -2447,8 +2495,10 @@ function refreshPeerUI(id, data){
     activeChatPeer.photoURL = data.photoURL;
     activeChatPeer.blocked = data.blocked || [];
     activeChatPeer.uid = data.uid;
+    activeChatPeer.verified = !!data.verified; activeChatPeer.verifiedColor = data.verifiedColor;
     $("#peerName").textContent = resolveDisplayName(id, data.name);
     setAvatarNode($("#peerAvatar"), data.name, displayPhoto);
+    applyVerifiedBadge($("#peerAvatar"), !!data.verified, data.verifiedColor);
     /* Chat header: a stranger I haven't saved -> ID big/primary, name
        small underneath. Once I save them (with my own name for them)
        -> that name flips up to be the big/primary line. */
@@ -2484,6 +2534,7 @@ function refreshPeerUI(id, data){
     $("#peerProfileId").textContent = data.id;
     $("#peerProfileBio").textContent = (data.bio && data.bio.trim()) ? data.bio : "مفيش نبذة";
     setAvatarNode($("#peerProfileAvatarBig"), data.name, displayPhoto);
+    applyVerifiedBadge($("#peerProfileAvatarBig"), !!data.verified, data.verifiedColor);
     /* Stranger (not saved) -> ID is the useful line, shown big on top.
        Saved -> my chosen name flips up to be the big/primary line. */
     $("#peerProfileOverlay").classList.toggle("peer-saved", isSavedContact(id));
@@ -2526,6 +2577,7 @@ function openMemberPeek(senderId){
   const data = peerCache[senderId] || groupMemberInfo(senderId);
   memberPeekId = senderId;
   setAvatarNode($("#memberPeekAvatarBig"), data.name, data.photoURL || "");
+  applyVerifiedBadge($("#memberPeekAvatarBig"), !!data.verified, data.verifiedColor);
   $("#memberPeekName").textContent = resolveDisplayName(senderId, data.name);
   $("#memberPeekId").textContent = data.id || senderId;
   $("#memberPeekBio").textContent = (data.bio && data.bio.trim()) ? data.bio : "مفيش نبذة";
@@ -3175,6 +3227,32 @@ async function openChat(peer){
       if(!s.empty) peer.uid = s.docs[0].id;
     }catch(e){ console.error(e); }
   }
+  /* peer objects captured in chat-list row closures (and search-result /
+     friend-list rows) are built once at render time — a later live update
+     (e.g. someone gets verified from the admin panel) lands in peerCache
+     as a NEW object, but never mutates the specific object this click
+     handler is still holding. Re-syncing from the freshest source we
+     have right now — peerCache if it's already been kept live by
+     watchPeer, otherwise a direct read — means the header can never open
+     on stale verified/name/photo data. */
+  if(!peer.isGroup){
+    const cached = peerCache[peer.id];
+    if(cached && cached !== peer){
+      peer.verified = !!cached.verified; peer.verifiedColor = cached.verifiedColor;
+      if(cached.name) peer.name = cached.name;
+      if("photoURL" in cached) peer.photoURL = cached.photoURL;
+    } else if(peer.uid){
+      try{
+        const snap = await db.collection("users").doc(peer.uid).get();
+        if(snap.exists){
+          const d = snap.data();
+          peer.verified = !!d.verified; peer.verifiedColor = d.verifiedColor;
+          if(d.name) peer.name = d.name;
+          peer.photoURL = d.photoURL || "";
+        }
+      }catch(e){ console.error(e); }
+    }
+  }
   activeChatPeer = peer;
   if(previousPeerId && previousPeerId !== peer.id) refreshChatItemDraft(previousPeerId);
   activeChatId = peer.isGroup ? peer.id : chatIdFor(currentUser.id, peer.id);
@@ -3187,6 +3265,7 @@ async function openChat(peer){
   updateSendButtonIcon();
   if(typeof closeEmojiPanel === "function") closeEmojiPanel();
 
+  clearTimeout(closeChatHideTimer);
   $("#chatPlaceholder").classList.add("hidden");
   $("#chatActive").classList.remove("hidden");
   $("#app").classList.add("chat-open");
@@ -3205,6 +3284,7 @@ async function openChat(peer){
   $("#peerStatus").classList.toggle("hidden", !peer.isGroup);
   if(!peer.isGroup && theyBlockedMeFromData(peer)) peerBlockHidden[peer.id] = true;
   setAvatarNode($("#peerAvatar"), peerDisplayName(peer), (!peer.isGroup && peerBlockHidden[peer.id]) ? "" : peer.photoURL);
+  applyVerifiedBadge($("#peerAvatar"), !!peer.verified, peer.verifiedColor);
   setWallpaperCSS($("#messages"), localStorage.getItem(prefKey("wallpaper")) || "");
 
   $$(".chat-item").forEach(n=>n.classList.remove("active"));
@@ -3391,6 +3471,7 @@ async function openChat(peer){
           avatarWrap.dataset.senderId = m.senderId;
           avatarWrap.innerHTML = "<span></span><img class=\"hidden\">";
           setAvatarNode(avatarWrap, sender.name, sender.photoURL);
+          applyVerifiedBadge(avatarWrap, !!sender.verified, sender.verifiedColor);
           if(!m.deletedForEveryone){
             const nameEl = document.createElement("span");
             nameEl.className = "msg-group-sender";
@@ -3592,6 +3673,32 @@ async function openChat(peer){
     chatDocExistsForActive = csnap.exists;
     activeChatDocData = csnap.exists ? csnap.data() : null;
     renderPinnedBanner(csnap.data());
+    /* groups have no `uid`, so watchPeer() never subscribes to them —
+       this chat-doc listener (which we already have open for pin/typing)
+       is the only live feed for a group's own name/photo/verified badge,
+       so push those into the header + chat-list row whenever they change,
+       not just at the moment the chat was opened. */
+    if(peer.isGroup && csnap.exists){
+      const gdata = csnap.data();
+      const freshVerified = !!gdata.verified;
+      const freshVerifiedColor = gdata.verifiedColor;
+      const freshName = gdata.groupName || "مجموعة";
+      const freshPhoto = gdata.groupPhotoURL || "";
+      peer.name = freshName; peer.photoURL = freshPhoto; peer.verified = freshVerified; peer.verifiedColor = freshVerifiedColor;
+      if(peerCache[peer.id]){ peerCache[peer.id].name = freshName; peerCache[peer.id].photoURL = freshPhoto; peerCache[peer.id].verified = freshVerified; peerCache[peer.id].verifiedColor = freshVerifiedColor; }
+      if(activeChatPeer && activeChatPeer.id === peer.id){
+        $("#peerName").textContent = freshName;
+        setAvatarNode($("#peerAvatar"), freshName, freshPhoto);
+        applyVerifiedBadge($("#peerAvatar"), freshVerified, freshVerifiedColor);
+      }
+      const ciNode = document.querySelector(`#ci-${peer.id}`);
+      if(ciNode){
+        setAvatarNode(ciNode, freshName, freshPhoto);
+        applyVerifiedBadge(ciNode, freshVerified, freshVerifiedColor);
+        const ciStrong = ciNode.parentElement && ciNode.parentElement.querySelector(".ci-info strong");
+        if(ciStrong) ciStrong.textContent = freshName;
+      }
+    }
     if(peer.id === AI_PEER_ID){
       const typing = !!(csnap.exists && csnap.data().aiTyping);
       $("#peerStatus").textContent = typing ? "بيكتب..." : "";
@@ -3711,12 +3818,22 @@ $("#submitAiOpinionBtn").addEventListener("click", async ()=>{
   setTimeout(closeAiOpinionModal, 1400);
 });
 
-/* ---- Blank admin page: table of everyone's Wasla AI opinion ---- */
+/* ---- Blank admin page: table of everyone's Wasla AI opinion ----
+   Guarded with a run-id: if two calls to this function ever overlap
+   (e.g. hashchange and the polling fallback below both firing close
+   together), only the LAST one is allowed to touch the DOM. Clearing
+   the table only happens right before that final write — never
+   up-front — so a slower, now-stale call can't clear what a faster,
+   newer call already painted, and can't append its own rows on top of
+   them either. That's what used to make every row show up twice. */
+let _aiFeedbackRenderRunId = 0;
 async function renderAiFeedbackTable(){
+  const runId = ++_aiFeedbackRenderRunId;
   const body = $("#aiFeedbackTableBody");
-  body.innerHTML = "";
   try{
     const snap = await db.collection("aiFeedback").orderBy("ts","desc").get();
+    if(runId !== _aiFeedbackRenderRunId) return; // a newer render call has since taken over — drop this stale result
+    body.innerHTML = "";
     $("#aiFeedbackEmpty").classList.toggle("hidden", !snap.empty);
     snap.forEach(doc=>{
       const d = doc.data();
@@ -3730,18 +3847,218 @@ async function renderAiFeedbackTable(){
       body.appendChild(tr);
     });
   }catch(err){
+    if(runId !== _aiFeedbackRenderRunId) return;
     console.error("Failed to load AI feedback table:", err);
+    body.innerHTML = "";
     $("#aiFeedbackEmpty").classList.remove("hidden");
     $("#aiFeedbackEmpty").textContent = "تعذر تحميل الجدول.";
   }
 }
-function syncAiFeedbackPageWithHash(){
+/* ---- Admin-page access gate -----------------------------------------
+   There's no client-side "password" here on purpose: any secret baked
+   into script.js can always be read by opening dev tools / view-source,
+   so a JS password would never actually be secret. Instead, access is
+   tied to the logged-in Firebase account itself: only a UID that has a
+   document in the "admins" Firestore collection can open this page, and
+   that check is enforced by the Firestore rules (allow read: if
+   request.auth.uid == id), not just by this JS — so someone without an
+   admin account gets a real "permission-denied" from Firestore itself,
+   not just a hidden button. Same admins collection already used for the
+   verified-badge toggle. */
+let _adminCheckCache = null; // {uid, isAdmin} — avoids re-hitting Firestore on every hash flicker
+async function isCurrentUserAdmin(){
+  if(!currentUser || !currentUser.uid || !db) return false;
+  if(_adminCheckCache && _adminCheckCache.uid === currentUser.uid) return _adminCheckCache.isAdmin;
+  try{
+    const doc = await db.collection("admins").doc(currentUser.uid).get();
+    _adminCheckCache = { uid: currentUser.uid, isAdmin: doc.exists };
+    return doc.exists;
+  }catch(err){
+    // permission-denied (not an admin) or offline — either way, no access
+    _adminCheckCache = { uid: currentUser.uid, isAdmin: false };
+    return false;
+  }
+}
+let _adminGateRunId = 0;
+let _lastSeenHash = location.hash;
+async function syncAiFeedbackPageWithHash(){
+  /* mark this hash as "already handled" up front, so the polling
+     fallback below never re-fires for a hash change this function is
+     already busy processing (that double-fire used to run
+     renderAiFeedbackTable() twice back to back, duplicating every
+     row in the admin table) */
+  _lastSeenHash = location.hash;
   const isFeedbackPage = location.hash === "#ai-feedback-table";
-  $("#aiFeedbackPage").classList.toggle("hidden", !isFeedbackPage);
-  if(isFeedbackPage) renderAiFeedbackTable();
+  if(!isFeedbackPage){
+    $("#aiFeedbackPage").classList.add("hidden");
+    return;
+  }
+  const runId = ++_adminGateRunId; // guards against a slower stale check winning a race
+  const allowed = await isCurrentUserAdmin();
+  if(runId !== _adminGateRunId) return; // hash moved on again while we were checking
+  if(!allowed){
+    $("#aiFeedbackPage").classList.add("hidden");
+    if(location.hash === "#ai-feedback-table") history.replaceState(null, "", location.pathname + location.search);
+    return;
+  }
+  $("#aiFeedbackPage").classList.remove("hidden");
+  renderAiFeedbackTable();
 }
 window.addEventListener("hashchange", syncAiFeedbackPageWithHash);
+window.addEventListener("popstate", syncAiFeedbackPageWithHash);
 syncAiFeedbackPageWithHash();
+/* Belt-and-braces fallback: typing/editing the #ai-feedback-table hash
+   straight into the address bar doesn't always fire "hashchange" (some
+   mobile browsers/PWA shells are inconsistent about it), which used to
+   mean the page only ever showed up after a manual refresh. Polling the
+   hash a few times a second costs nothing and guarantees it always
+   shows/hides itself immediately, with zero refresh needed either way.
+   (_lastSeenHash itself is declared above, right before
+   syncAiFeedbackPageWithHash, and gets kept in sync by that function
+   every time it runs — so this poll only ever fires for a hash change
+   that slipped past both "hashchange" and "popstate" entirely, never
+   as a redundant second call for one they already caught.) */
+setInterval(()=>{
+  if(location.hash !== _lastSeenHash){
+    syncAiFeedbackPageWithHash();
+  }
+}, 400);
+
+/* =====================================================================
+   ADMIN PAGE — "علامة توثيق" tab: every user + group ID, each with a
+   toggle button that grants/revokes their blue verified badge (stored
+   as a `verified` boolean on the user's doc in "users", or the group's
+   doc in "chats"). That flag then rides along wherever that doc's data
+   already flows through the app (peerCache, chat list, chat header,
+   the profile modal, and — for me — currentUser), so applyVerifiedBadge()
+   picks it up automatically without any extra plumbing per screen. ---- */
+$("#adminTabOpinionBtn").addEventListener("click", ()=>{
+  $("#adminTabOpinionBtn").classList.add("active");
+  $("#adminTabVerifyBtn").classList.remove("active");
+  $("#adminOpinionView").classList.remove("hidden");
+  $("#adminVerifyView").classList.add("hidden");
+});
+$("#adminTabVerifyBtn").addEventListener("click", ()=>{
+  $("#adminTabVerifyBtn").classList.add("active");
+  $("#adminTabOpinionBtn").classList.remove("active");
+  $("#adminVerifyView").classList.remove("hidden");
+  $("#adminOpinionView").classList.add("hidden");
+  loadVerifiedIdsList();
+});
+
+/* looks an ID up as a user first, then as a group (by its join-by-id
+   `groupId`, falling back to the chat doc's own id) — returns
+   { coll, refId } to write `verified` on, or null if nothing matched. */
+async function resolveVerifyTarget(id){
+  const usersSnap = await db.collection("users").where("id","==",id).limit(1).get();
+  if(!usersSnap.empty) return { coll:"users", refId: usersSnap.docs[0].id };
+  const byGroupId = await db.collection("chats").where("type","==","group").where("groupId","==",id).limit(1).get();
+  if(!byGroupId.empty) return { coll:"chats", refId: byGroupId.docs[0].id };
+  const byDocId = await db.collection("chats").doc(id).get();
+  if(byDocId.exists && byDocId.data().type === "group") return { coll:"chats", refId: id };
+  return null;
+}
+
+/* one rectangular row per currently-verified ID: the ID itself on one
+   side, a "حذف التوثيق" button on the other — no name/photo, ever. */
+function buildVerifyRow(id, coll, refId){
+  const row = document.createElement("div");
+  row.className = "verify-id-row";
+  row.dataset.coll = coll;
+  row.dataset.refId = refId;
+  row.innerHTML = `
+    <span class="verify-id-text">${escapeHtml(id)}</span>
+    <button type="button" class="verify-remove-btn">حذف التوثيق</button>`;
+  return row;
+}
+async function loadVerifiedIdsList(){
+  const list = $("#verifyIdsList");
+  const loading = $("#verifyListLoading");
+  list.innerHTML = "";
+  loading.classList.remove("hidden");
+  loading.textContent = "جاري تحميل الأيديهات الموثّقة...";
+  try{
+    const [usersSnap, groupsSnap] = await Promise.all([
+      db.collection("users").where("verified","==",true).get(),
+      db.collection("chats").where("type","==","group").where("verified","==",true).get()
+    ]);
+    const frag = document.createDocumentFragment();
+    usersSnap.forEach(doc=>{
+      const d = doc.data();
+      frag.appendChild(buildVerifyRow(d.id || doc.id, "users", doc.id));
+    });
+    groupsSnap.forEach(doc=>{
+      const d = doc.data();
+      frag.appendChild(buildVerifyRow(d.groupId || doc.id, "chats", doc.id));
+    });
+    list.appendChild(frag);
+    loading.classList.toggle("hidden", (usersSnap.size + groupsSnap.size) > 0);
+    if(!usersSnap.size && !groupsSnap.size) loading.textContent = "مفيش أيدي موثّق دلوقتي.";
+  }catch(err){
+    console.error("failed to load verified ids:", err);
+    loading.textContent = "تعذر تحميل القايمة.";
+  }
+}
+$("#verifyIdsList").addEventListener("click", async e=>{
+  const btn = e.target.closest(".verify-remove-btn");
+  if(!btn) return;
+  const row = btn.closest(".verify-id-row");
+  btn.disabled = true;
+  try{
+    await db.collection(row.dataset.coll).doc(row.dataset.refId).set({ verified:false }, {merge:true});
+    row.remove();
+    toast("تم إلغاء التوثيق");
+  }catch(err){
+    console.error("verify remove failed:", err);
+    btn.disabled = false;
+    if(err && (err.code === "permission-denied" || /permission/i.test(err.message||""))){
+      toast("الحفظ اترفض — مفيش صلاحية تعديل في Firestore", true);
+    } else {
+      toast("حصل خطأ، جرب تاني", true);
+    }
+  }
+});
+
+$("#verifyAddBtn").addEventListener("click", async ()=>{
+  const input = $("#verifyIdInput");
+  const status = $("#verifyActionStatus");
+  const id = input.value.trim();
+  if(!id){ status.textContent = "اكتب الأيدي الأول."; return; }
+  status.textContent = "بدور على الأيدي ده...";
+  $("#verifyAddBtn").disabled = true;
+  try{
+    const target = await resolveVerifyTarget(id);
+    if(!target){ status.textContent = "مفيش شخص أو جروب بالأيدي ده."; return; }
+    await db.collection(target.coll).doc(target.refId).set({ verified:true }, {merge:true});
+    status.textContent = `تم توثيق الأيدي ${id} ✓`;
+    toast("تم التوثيق");
+    input.value = "";
+    /* drop it straight into the list instead of a full reload */
+    if(!$(`.verify-id-row[data-ref-id="${target.refId}"]`)){
+      $("#verifyListLoading").classList.add("hidden");
+      $("#verifyIdsList").prepend(buildVerifyRow(id, target.coll, target.refId));
+    }
+  }catch(err){
+    console.error("verify write failed:", err);
+    /* the #1 real-world cause of "توثيق مش شغال للأشخاص لكن شغال للجروبات"
+       is Firestore security rules: most setups let a user write only to
+       THEIR OWN "users" doc, so this admin page — which is just a hidden
+       route, not a real authenticated admin role — gets silently
+       rejected when it tries to set `verified` on someone ELSE's user
+       doc, while a group's chat doc (writable by any participant) goes
+       through fine. If that's what's happening here, the fix has to
+       happen in the Firestore rules themselves (e.g. an explicit admin
+       UID allow-list), not in this page's code. */
+    if(err && (err.code === "permission-denied" || /permission/i.test(err.message||""))){
+      status.textContent = "الحفظ اترفض بسبب صلاحيات Firestore — قواعد الأمان مش مسموح فيها لأي حساب إنه يعدّل بيانات توثيق مستخدم تاني غير حسابه هو. لازم تتضاف قاعدة استثناء لحسابك في Firestore Rules.";
+    } else {
+      status.textContent = "حصل خطأ، جرب تاني.";
+    }
+  }finally{
+    $("#verifyAddBtn").disabled = false;
+  }
+});
+
 
 /* Fully closes whichever chat is open: stops its Firestore listeners
    (so nothing from it can silently mark messages "read" anymore) and
@@ -3750,6 +4067,7 @@ syncAiFeedbackPageWithHash();
    running in the background and would still flip new messages to
    "read" the instant they arrived, even though the person was just
    sitting on the chat list, not actually looking at that conversation. */
+let closeChatHideTimer = null;
 function closeActiveChat(){
   if(msgUnsub){ msgUnsub(); msgUnsub = null; }
   if(chatDocUnsub){ chatDocUnsub(); chatDocUnsub = null; }
@@ -3772,9 +4090,22 @@ function closeActiveChat(){
   $("#scrollToBottomBtn").classList.remove("stbb-show");
   saveLastChat("");
   $("#app").classList.remove("chat-open");
-  $("#chatActive").classList.add("hidden");
-  $("#chatPlaceholder").classList.remove("hidden");
-  if(lastChatListSnapDocs.length) renderChatList(lastChatListSnapDocs);
+  clearTimeout(closeChatHideTimer);
+  /* On the mobile single-pane layout, .chat-window slides itself off to
+     the right over .28s when "chat-open" comes off (see the transform
+     rule in the max-width:767px media query). If we swap #chatActive
+     for #chatPlaceholder right away, the chat's content vanishes the
+     instant the button is tapped and an empty panel slides away instead
+     — so on mobile we wait for that slide to actually finish first. On
+     the desktop split view nothing slides, so there's no reason to wait. */
+  const isMobileLayout = window.matchMedia("(max-width:767px)").matches;
+  const finishClose = ()=>{
+    $("#chatActive").classList.add("hidden");
+    $("#chatPlaceholder").classList.remove("hidden");
+    if(lastChatListSnapDocs.length) renderChatList(lastChatListSnapDocs);
+  };
+  if(isMobileLayout) closeChatHideTimer = setTimeout(finishClose, 300);
+  else finishClose();
 }
 $("#backBtn").addEventListener("click", ()=>{
   /* pressing back while messages are selected should just cancel the
@@ -5353,8 +5684,14 @@ async function deleteChatForPeer(peerId, opts={}){
         $("#pinnedBanner").classList.add("hidden");
         saveLastChat("");
         $("#app").classList.remove("chat-open");
-        $("#chatActive").classList.add("hidden");
-        $("#chatPlaceholder").classList.remove("hidden");
+        clearTimeout(closeChatHideTimer);
+        const isMobileLayout = window.matchMedia("(max-width:767px)").matches;
+        const finishClose = ()=>{
+          $("#chatActive").classList.add("hidden");
+          $("#chatPlaceholder").classList.remove("hidden");
+        };
+        if(isMobileLayout) closeChatHideTimer = setTimeout(finishClose, 300);
+        else finishClose();
       }
     }
     return true;
@@ -6891,6 +7228,9 @@ function openSettings(){
   $("#settingsBioInput").value = currentUser.bio || "";
   $("#settingsIdText").textContent = currentUser.id;
   setAvatarNode($("#settingsAvatarPreview"), currentUser.name, currentUser.photoURL);
+  applyVerifiedBadge($("#settingsAvatarPreview"), !!currentUser.verified, currentUser.verifiedColor);
+  buildVerifiedColorGrid();
+  renderCustomThemeList();
   renderLastSeenPrivacyUI();
   $("#readReceiptsToggle").checked = currentUser.readReceipts !== false;
   renderDevicesPane();
@@ -7049,7 +7389,7 @@ function buildColorGrid(){
     sw.className = "color-swatch" + (hex===current ? " active" : "");
     sw.style.background = hex;
     sw.dataset.color = hex;
-    sw.addEventListener("click", ()=> applyAccent(hex));
+    sw.addEventListener("click", ()=>{ clearCustomThemeActive(); applyAccent(hex); });
     grid.appendChild(sw);
   });
   $("#customColorInput").value = current;
@@ -7058,8 +7398,212 @@ function buildColorGrid(){
 $("#customColorInput").addEventListener("input", (e)=>{
   const hex = e.target.value;
   $("#customColorSwatch").style.background = hex;
+  clearCustomThemeActive();
   applyAccent(hex);
 });
+
+/* ---- مظهر خاص (custom theme): lets the person pick message colors,
+   button color, background color and input color separately, save it as
+   a named theme, then apply/delete it later from a small card list at
+   the bottom of the appearance pane. Saved per-user in localStorage,
+   same pattern as theme/accent/wallpaper prefs above. ---- */
+function loadCustomThemes(){
+  try{
+    const raw = localStorage.getItem(prefKey("customThemes"));
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){ return []; }
+}
+function saveCustomThemes(list){
+  try{ localStorage.setItem(prefKey("customThemes"), JSON.stringify(list)); }catch(e){}
+}
+function clearCustomThemeActive(){
+  if(localStorage.getItem(prefKey("customThemeActive"))){
+    localStorage.removeItem(prefKey("customThemeActive"));
+    renderCustomThemeList();
+  }
+}
+/* simple luminance check so text on a button stays readable whatever
+   color the person picks for it */
+function pickInkColor(hex){
+  const h = (hex || "#f2b134").replace("#","");
+  const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+  const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+  return luminance > 0.6 ? "#1a1305" : "#ffffff";
+}
+/* nudge a hex color a bit darker/lighter — used to derive --bg-2 from the
+   single background color the person picks */
+function shadeColor(hex, percent){
+  const h = (hex || "#0a0f1c").replace("#","");
+  let r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+  const amt = Math.round(2.55 * percent);
+  r = Math.max(0, Math.min(255, r + amt));
+  g = Math.max(0, Math.min(255, g + amt));
+  b = Math.max(0, Math.min(255, b + amt));
+  return "#" + [r,g,b].map(v=> v.toString(16).padStart(2,"0")).join("");
+}
+function applyCustomTheme(theme, persist=true){
+  const root = document.documentElement.style;
+  root.setProperty("--bubble-out", theme.msgOut);
+  root.setProperty("--bubble-in", theme.msgIn);
+  root.setProperty("--chat-accent", theme.btn);
+  root.setProperty("--chat-accent-ink", pickInkColor(theme.btn));
+  root.setProperty("--bg", theme.bg);
+  root.setProperty("--bg-2", shadeColor(theme.bg, -6));
+  root.setProperty("--chat-bg", `radial-gradient(1200px 700px at 50% -10%, ${theme.bg} 0%, ${theme.bg} 55%)`);
+  root.setProperty("--input-bg", theme.input);
+  root.setProperty("--composer-pill-bg", theme.input);
+  if(persist && theme.id){
+    localStorage.setItem(prefKey("customThemeActive"), theme.id);
+    renderCustomThemeList();
+  }
+}
+function revertToNormalTheme(){
+  const root = document.documentElement.style;
+  ["--bubble-out","--bubble-in","--chat-accent-ink","--bg","--bg-2","--chat-bg","--input-bg","--composer-pill-bg"].forEach(p=>root.removeProperty(p));
+  localStorage.removeItem(prefKey("customThemeActive"));
+  applyAccent(localStorage.getItem(prefKey("accent")) || "#f2b134");
+  renderCustomThemeList();
+}
+function renderCustomThemeList(){
+  const box = $("#customThemeList"); if(!box) return;
+  const empty = $("#customThemeEmpty");
+  const list = loadCustomThemes();
+  const activeId = localStorage.getItem(prefKey("customThemeActive")) || "";
+  box.innerHTML = "";
+  if(empty) empty.classList.toggle("hidden", list.length > 0);
+  list.forEach(t=>{
+    const isActive = t.id === activeId;
+    const card = document.createElement("div");
+    card.className = "custom-theme-card" + (isActive ? " active" : "");
+    card.innerHTML = `
+      <div class="custom-theme-name">
+        <span class="custom-theme-dot" style="background:${escapeHtml(t.btn)}"></span>
+        <span>${escapeHtml(t.name)}</span>
+      </div>
+      <div class="custom-theme-actions">
+        <button type="button" class="custom-theme-apply-btn${isActive ? " applied" : ""}">${isActive ? "متطبق" : "تطبيق"}</button>
+        <button type="button" class="custom-theme-delete-btn" aria-label="حذف">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>`;
+    card.querySelector(".custom-theme-apply-btn").addEventListener("click", ()=>{
+      applyCustomTheme(t, true);
+      toast("تم تطبيق المظهر");
+    });
+    card.querySelector(".custom-theme-delete-btn").addEventListener("click", ()=>{
+      saveCustomThemes(loadCustomThemes().filter(x=> x.id !== t.id));
+      if(activeId === t.id) revertToNormalTheme();
+      renderCustomThemeList();
+      toast("تم حذف المظهر");
+    });
+    box.appendChild(card);
+  });
+}
+function currentThemeEditorColors(){
+  return {
+    msgOut: $("#themeMsgOutInput").value,
+    msgIn: $("#themeMsgInInput").value,
+    btn: $("#themeBtnInput").value,
+    bg: $("#themeBgInput").value,
+    input: $("#themeInputInput").value
+  };
+}
+let themeEditorSnapshotId = "";
+function closeThemeEditor(){
+  $("#themeEditorOverlay").classList.add("hidden");
+  // whatever was actually active before opening the editor (or nothing) —
+  // restore it, since edits made while previewing weren't saved
+  const t = themeEditorSnapshotId ? loadCustomThemes().find(x=> x.id === themeEditorSnapshotId) : null;
+  if(t) applyCustomTheme(t, true);
+  else revertToNormalTheme();
+}
+$("#openThemeEditorBtn").addEventListener("click", ()=>{
+  themeEditorSnapshotId = localStorage.getItem(prefKey("customThemeActive")) || "";
+  const d = { msgOut:"#2a3550", msgIn:"#182238", btn: localStorage.getItem(prefKey("accent")) || "#f2b134", bg:"#0a0f1c", input:"#141c2c" };
+  $("#themeMsgOutInput").value = d.msgOut; $("#themeMsgOutSwatch").style.background = d.msgOut;
+  $("#themeMsgInInput").value = d.msgIn; $("#themeMsgInSwatch").style.background = d.msgIn;
+  $("#themeBtnInput").value = d.btn; $("#themeBtnSwatch").style.background = d.btn;
+  $("#themeBgInput").value = d.bg; $("#themeBgSwatch").style.background = d.bg;
+  $("#themeInputInput").value = d.input; $("#themeInputSwatch").style.background = d.input;
+  $("#themeNameInput").value = "";
+  $("#themeEditorMsg").textContent = "";
+  $("#themeEditorOverlay").classList.remove("hidden");
+});
+$("#closeThemeEditor").addEventListener("click", closeThemeEditor);
+$("#themeEditorOverlay").addEventListener("click", (e)=>{ if(e.target.id === "themeEditorOverlay") closeThemeEditor(); });
+$("#cancelCustomThemeBtn").addEventListener("click", ()=>{
+  if(!localStorage.getItem(prefKey("customThemeActive"))){ toast("مفيش مظهر خاص مطبق دلوقتي", true); return; }
+  revertToNormalTheme();
+  toast("تم إلغاء المظهر الخاص");
+});
+[
+  ["themeMsgOutInput","themeMsgOutSwatch"],
+  ["themeMsgInInput","themeMsgInSwatch"],
+  ["themeBtnInput","themeBtnSwatch"],
+  ["themeBgInput","themeBgSwatch"],
+  ["themeInputInput","themeInputSwatch"]
+].forEach(([inputId, swatchId])=>{
+  $("#"+inputId).addEventListener("input", (e)=>{
+    $("#"+swatchId).style.background = e.target.value;
+    applyCustomTheme(currentThemeEditorColors(), false);
+  });
+});
+$("#createThemeBtn").addEventListener("click", ()=>{
+  const msg = $("#themeEditorMsg");
+  const name = $("#themeNameInput").value.trim();
+  if(!name){ msg.textContent = "اكتب اسم للمظهر الأول"; return; }
+  const theme = Object.assign({ id: "ct_" + Date.now() + "_" + Math.random().toString(36).slice(2,7), name }, currentThemeEditorColors());
+  const list = loadCustomThemes();
+  list.push(theme);
+  saveCustomThemes(list);
+  themeEditorSnapshotId = theme.id;
+  applyCustomTheme(theme, true);
+  msg.textContent = "";
+  $("#themeEditorOverlay").classList.add("hidden");
+  toast("تم إنشاء المظهر");
+});
+
+/* -- verified badge color (only ever shown/usable for an account that's
+   actually verified — granted from the admin panel, see resolveVerifyTarget
+   above; this just lets a verified person pick which color their own
+   seal renders in, saved as `verifiedColor` on their own "users" doc) -- */
+function buildVerifiedColorGrid(){
+  const block = $("#verifiedColorBlock");
+  if(!block) return;
+  if(!currentUser || !currentUser.verified){
+    block.classList.add("hidden");
+    return;
+  }
+  block.classList.remove("hidden");
+  const grid = $("#verifiedColorGrid");
+  grid.innerHTML = "";
+  const current = currentUser.verifiedColor || "#4fc3f7";
+  VERIFIED_COLORS.forEach(hex=>{
+    const sw = document.createElement("button");
+    sw.type = "button";
+    sw.className = "color-swatch" + (hex===current ? " active" : "");
+    sw.style.background = hex;
+    sw.dataset.color = hex;
+    sw.title = hex;
+    sw.addEventListener("click", ()=> applyVerifiedColor(hex));
+    grid.appendChild(sw);
+  });
+  $("#verifiedColorPreview").innerHTML = verifiedBadgeSVG(current);
+}
+async function applyVerifiedColor(hex){
+  if(!currentUser || !currentUser.verified || currentUser.verifiedColor === hex) return;
+  currentUser.verifiedColor = hex;
+  buildVerifiedColorGrid();
+  applyVerifiedBadge($("#myAvatar"), true, hex);
+  applyVerifiedBadge($("#settingsAvatarPreview"), true, hex);
+  try{
+    await db.collection("users").doc(currentUser.uid).set({ verifiedColor: hex }, {merge:true});
+    toast("تم تغيير لون التوثيق");
+  }catch(err){
+    console.error("verified color save failed:", err);
+    toast("تعذر حفظ اللون، جرّب تاني", true);
+  }
+}
 
 /* -- wallpaper pane -- */
 function buildWallpaperGrid(){
