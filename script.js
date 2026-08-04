@@ -1173,41 +1173,64 @@ function resetUIAfterAuthEnd(){
 }
 
 async function logout(){
-  try{
-    await setPresence(false);
-    stopPresenceTracking();
-    if(chatListUnsub){ chatListUnsub(); chatListUnsub = null; }
-    if(msgUnsub){ msgUnsub(); msgUnsub = null; }
-    if(chatDocUnsub){ chatDocUnsub(); chatDocUnsub = null; }
-    if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
-    unwatchAllPeers();
-    stopWatchingOwnDevice();
+  /* snapshot everything the background cleanup below still needs,
+     BEFORE wiping currentUser — resetUIAfterAuthEnd() (called right
+     after) sets currentUser = null, and the writes below run in the
+     background after that, so they can't rely on currentUser anymore */
+  const uid = currentUser && currentUser.uid;
+  const deviceId = getDeviceId();
+  const wasPrimary = isPrimaryDeviceSession;
+  const priorDeviceSlots = (currentUser && Array.isArray(currentUser.deviceSlots)) ? currentUser.deviceSlots.slice() : [];
 
-    if(currentUser && currentUser.uid && db){
-      const deviceId = getDeviceId();
-      const userRef = db.collection("users").doc(currentUser.uid);
-      try{
-        if(isPrimaryDeviceSession){
-          /* logging out from the primary device kicks every shared
-             device out at once, and frees the account up so whoever
-             logs in next becomes the new primary */
-          await userRef.update({ primaryDeviceId: null, deviceSlots: [] });
-        } else {
-          /* a shared device logging out just empties its own place
-             back up, without touching anyone else's place or the
-             places count itself */
-          const slots = Array.isArray(currentUser.deviceSlots) ? currentUser.deviceSlots.slice() : [];
-          const idx = slots.findIndex(s=> s && s.deviceId === deviceId);
-          if(idx !== -1){ slots[idx] = null; await userRef.update({ deviceSlots: slots }); }
-        }
-      }catch(e){ console.error(e); }
-    }
-
-    if(auth) await auth.signOut();
-  }catch(e){ console.error(e); }
-
+  /* stop every realtime listener and flip back to the login screen
+     FIRST, synchronously — none of this touches the network, so it
+     can never be delayed by a slow or failed request. Previously this
+     came AFTER the network writes below, so a slow connection left the
+     old chat screen stuck on screen with nothing clickable until the
+     person reloaded the page. */
+  stopPresenceTracking();
+  if(chatListUnsub){ chatListUnsub(); chatListUnsub = null; }
+  if(msgUnsub){ msgUnsub(); msgUnsub = null; }
+  if(chatDocUnsub){ chatDocUnsub(); chatDocUnsub = null; }
+  if(activeChatPeer && activeChatPeer.isGroup) unwatchGroupPresence(activeChatPeer.id);
+  unwatchAllPeers();
+  stopWatchingOwnDevice();
   resetUIAfterAuthEnd();
   toast("تم تسجيل الخروج");
+
+  /* everything from here on is best-effort network cleanup that
+     happens in the background — the person is already free to type in
+     a new login right away and none of this should block that */
+  try{
+    if(uid && db){
+      await db.collection("users").doc(uid).set({
+        online:false, lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
+    }
+  }catch(e){ /* best-effort only */ }
+
+  try{
+    if(uid && db){
+      const userRef = db.collection("users").doc(uid);
+      if(wasPrimary){
+        /* logging out from the primary device kicks every shared
+           device out at once, and frees the account up so whoever
+           logs in next becomes the new primary */
+        await userRef.update({ primaryDeviceId: null, deviceSlots: [] });
+      } else {
+        /* a shared device logging out just empties its own place
+           back up, without touching anyone else's place or the
+           places count itself */
+        const slots = priorDeviceSlots.slice();
+        const idx = slots.findIndex(s=> s && s.deviceId === deviceId);
+        if(idx !== -1){ slots[idx] = null; await userRef.update({ deviceSlots: slots }); }
+      }
+    }
+  }catch(e){ console.error(e); }
+
+  try{
+    if(auth) await auth.signOut();
+  }catch(e){ console.error(e); }
 }
 $("#logoutBtn").addEventListener("click", async ()=>{
   const ok = await askConfirm("تسجيل الخروج", "هل تريد تسجيل الخروج؟");
