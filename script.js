@@ -955,7 +955,16 @@ function watchOwnDevice(uid){
     } else {
       const stillIn = currentUser.deviceSlots.some(s=> s && s.deviceId === deviceId);
       isPrimaryDeviceSession = false;
-      if(!stillIn){
+      /* offline persistence means the FIRST snapshot after subscribing
+         can come straight from the local cache — which, right after
+         this device just logged itself back in and got added to a
+         slot, may still hold the state from BEFORE that write landed.
+         Trusting that stale cached read here would force-logout a
+         device the instant it logs in. Only ever act on a
+         server-confirmed snapshot (fromCache === false) so a real kick
+         from the primary still works, just without the false-positive
+         on fresh logins. */
+      if(!stillIn && !snap.metadata.fromCache){
         toast("تم تسجيل خروجك من هذا الجهاز");
         logout();
         return;
