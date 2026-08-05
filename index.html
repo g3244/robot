@@ -1589,6 +1589,15 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   <button type="button" class="lightbox-close" id="closeLightbox">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
   </button>
+  <button type="button" class="lightbox-menu-btn" id="lightboxMenuBtn" title="خيارات">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="12" cy="19" r="2.2"/></svg>
+  </button>
+  <div class="lightbox-menu hidden" id="lightboxMenu">
+    <button type="button" class="lightbox-menu-item" id="lightboxSaveBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+      <span>حفظ في الجهاز</span>
+    </button>
+  </div>
   <img id="lightboxImg" src="" alt="">
   <video id="lightboxVideo" class="hidden" src="" controls playsinline></video>
 </div>

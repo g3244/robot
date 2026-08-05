@@ -2697,10 +2697,15 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
 
 /* ---------------- fullscreen image/video lightbox ----------------
    Opens pictures AND videos right here on the site — nothing ever
-   navigates to Cloudinary's raw URL in a new tab/window. */
+   navigates to Cloudinary's raw URL in a new tab/window. Solid black
+   backdrop (no page content bleeding through), with a "⋮" menu (top
+   right) to save the current picture/video straight to the device. */
+let currentLightboxSrc = "", currentLightboxKind = "image";
 function openMediaLightbox(src, kind){
   if(!src) return;
   const imgEl = $("#lightboxImg"), vidEl = $("#lightboxVideo");
+  currentLightboxSrc = src; currentLightboxKind = kind || "image";
+  $("#lightboxMenu").classList.add("hidden");
   if(kind === "video"){
     imgEl.src = ""; imgEl.classList.add("hidden");
     vidEl.src = src; vidEl.classList.remove("hidden");
@@ -2715,17 +2720,67 @@ function openMediaLightbox(src, kind){
 function openLightbox(src){ openMediaLightbox(src, "image"); }
 function closeLightbox(){
   $("#imageLightbox").classList.add("hidden");
+  $("#lightboxMenu").classList.add("hidden");
   const vidEl = $("#lightboxVideo");
   vidEl.pause(); vidEl.src = "";
   $("#lightboxImg").src = "";
+  currentLightboxSrc = "";
+}
+/* Best-effort extension from the real URL (Cloudinary URLs keep the
+   original one), falling back to a sane default per media kind. */
+function guessExtFromUrl(url, fallback){
+  try{
+    const path = new URL(url, location.href).pathname;
+    const m = path.match(/\.([a-zA-Z0-9]{2,5})$/);
+    if(m) return m[1];
+  }catch(e){}
+  return fallback;
+}
+async function saveLightboxMediaToDevice(){
+  $("#lightboxMenu").classList.add("hidden");
+  const src = currentLightboxSrc;
+  if(!src) return;
+  const kind = currentLightboxKind;
+  try{
+    const res = await fetch(src);
+    if(!res.ok) throw new Error("fetch failed");
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const ext = guessExtFromUrl(src, kind === "video" ? "mp4" : "jpg");
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `wasla-${kind === "video" ? "فيديو" : "صورة"}-${Date.now()}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(blobUrl), 4000);
+    toast("تم الحفظ");
+  }catch(err){
+    console.error(err);
+    /* Cross-origin fetch can fail even when a plain download link would
+       work fine — fall back to just opening the direct URL so the
+       person can still save it manually instead of getting stuck. */
+    window.open(src, "_blank");
+  }
 }
 $("#peerProfileAvatarBig").addEventListener("click", ()=>{
   const img = $("#peerProfileAvatarImg");
   if(!img.classList.contains("hidden") && img.src) openLightbox(img.src);
 });
 $("#closeLightbox").addEventListener("click", closeLightbox);
+$("#lightboxMenuBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  $("#lightboxMenu").classList.toggle("hidden");
+});
+$("#lightboxSaveBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  saveLightboxMediaToDevice();
+});
 $("#imageLightbox").addEventListener("click", e=>{
   if(e.target.id === "imageLightbox") closeLightbox();
+  else if(!e.target.closest(".lightbox-menu") && !e.target.closest("#lightboxMenuBtn")){
+    $("#lightboxMenu").classList.add("hidden");
+  }
 });
 
 /* =====================================================================
