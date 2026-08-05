@@ -942,6 +942,21 @@ input,textarea{font-family:inherit;}
 .msg-image-img.msg-image-blurred{filter:blur(16px) brightness(.72); transform:scale(1.1);}
 .msg-image[data-state="done"] .msg-image-ph{display:none;}
 video.msg-image-img{background:#000;}
+/* Small "HD" tag pinned on the corner of a sent/received image or video
+   that went out with HD turned on — sits on the media itself (not a
+   separate image), transparent glass background, gently breathing glow
+   so it reads as an active quality indicator. */
+.msg-hd-badge{
+  position:absolute; z-index:2; inset-inline-end:6px; bottom:6px;
+  font-size:9.5px; font-weight:800; letter-spacing:.3px; color:#fff;
+  background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.55);
+  border-radius:4px; padding:1px 5px; backdrop-filter:blur(2px);
+  animation:hdBadgeGlow 2.2s ease-in-out infinite;
+}
+@keyframes hdBadgeGlow{
+  0%, 100%{ box-shadow:0 0 0 0 rgba(255,255,255,.15); border-color:rgba(255,255,255,.35); }
+  50%{ box-shadow:0 0 8px 2px rgba(255,255,255,.6); border-color:rgba(255,255,255,.9); }
+}
 /* Small centered ▶ badge on a finished VIDEO bubble, so it reads as a
    video and not a photo at a glance — tapping it (like tapping the
    picture) opens the in-site player. */
@@ -1724,13 +1739,21 @@ video.msg-image-img{background:#000;}
   padding-bottom:calc(30px + env(safe-area-inset-bottom));
   padding-left:calc(30px + env(safe-area-inset-left));
   padding-right:calc(30px + env(safe-area-inset-right));
-  cursor:zoom-out; transition:opacity .2s;
+  cursor:pointer; transition:opacity .2s;
   height:100vh; height:100dvh;
 }
 .lightbox.hidden{opacity:0; pointer-events:none;}
-.lightbox img{max-width:min(90vw,560px); max-height:88vh; max-height:88dvh; object-fit:contain; box-shadow:0 30px 90px -20px rgba(0,0,0,.8); border-radius:12px;}
+.lightbox img{max-width:min(90vw,560px); max-height:88vh; max-height:88dvh; object-fit:contain; box-shadow:0 30px 90px -20px rgba(0,0,0,.8); border-radius:12px; cursor:default;}
 .lightbox video{max-width:min(92vw,720px); max-height:88vh; max-height:88dvh; border-radius:12px; box-shadow:0 30px 90px -20px rgba(0,0,0,.8); cursor:default;}
 .lightbox video.hidden{display:none;}
+/* ---- Tapping the empty black backdrop (not the picture, not a
+   button) just fades the × / ⋮ controls out of the way instead of
+   backing out of the viewer — another tap on the backdrop brings them
+   right back. The × itself is still the actual way to close it. ---- */
+.lightbox-close,
+.lightbox-menu-btn{transition:opacity .18s ease, transform .18s ease;}
+.lightbox.ui-hidden .lightbox-close,
+.lightbox.ui-hidden .lightbox-menu-btn{opacity:0; transform:scale(.85); pointer-events:none;}
 .lightbox-close{
   position:absolute; top:calc(18px + env(safe-area-inset-top)); left:calc(18px + env(safe-area-inset-left));
   width:38px; height:38px; border-radius:50%;
@@ -1773,7 +1796,8 @@ video.msg-image-img{background:#000;}
    image/video/file, before it's sent. Icon row sits along the top edge
    on phones (mirrors a typical chat app); on wider/desktop screens it
    moves to a vertical strip down the side instead, per how the person
-   wants it there. Every icon except × and send is decorative only. ---- */
+   wants it there. Download and HD are wired up for images/videos; the
+   rest (rotate/text/draw) stay decorative. ---- */
 .send-preview{
   position:fixed; inset:0; z-index:190; background:#000; color:#fff;
   display:flex; flex-direction:column;
@@ -1799,6 +1823,28 @@ video.msg-image-img{background:#000;}
 .send-preview-close{background:rgba(255,255,255,.14);}
 .send-preview-hd,
 .send-preview-aa{font-size:11.5px; font-weight:800; letter-spacing:.2px;}
+
+/* ---- HD toggle button — three states:
+   1) default: same look as the other tool icons
+   2) unsupported (media below HD resolution / device can't do it):
+      dim + not clickable
+   3) active: bg turns white, "HD" text turns black, a little checkmark
+      badge pops on the bottom-right corner so it reads as "on". ---- */
+.send-preview-tool-hd{position:relative; transition:background-color .18s, border-color .18s;}
+.send-preview-hd-check{
+  position:absolute; bottom:-3px; right:-3px; width:14px; height:14px; border-radius:50%;
+  background:#22c55e; color:#fff; display:flex; align-items:center; justify-content:center;
+  opacity:0; transform:scale(.4); transition:opacity .16s, transform .16s;
+  box-shadow:0 0 0 2px #000;
+}
+.send-preview-tool-hd.hd-unsupported{
+  opacity:.35; cursor:not-allowed; pointer-events:none;
+}
+.send-preview-tool-hd.hd-active{
+  background:#fff; border-color:#fff; color:#111;
+}
+.send-preview-tool-hd.hd-active .send-preview-hd-check{opacity:1; transform:scale(1);}
+
 .send-preview-media{
   flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:8px 20px;
 }
@@ -1829,6 +1875,70 @@ video.msg-image-img{background:#000;}
 }
 .send-preview-send-btn:hover{filter:brightness(1.08);}
 .send-preview-send-btn svg{transform:scaleX(-1);}
+/* =====================================================================
+   Rotate editor — full-screen page opened from the pre-send preview's
+   rotate icon (image only). Grid + corner marks over the picture, a
+   Cancel/rotate/Save bar at the bottom. The frame is kept square-ish
+   (equal max width/height) so a 90°/270° turn never spills outside the
+   screen.
+   ===================================================================== */
+.rotate-editor{
+  position:fixed; inset:0; z-index:210; background:#000; color:#fff;
+  display:flex; flex-direction:column; height:100vh; height:100dvh;
+}
+.rotate-editor.hidden{display:none;}
+.rotate-editor-stage{
+  flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
+  padding:32px 24px;
+}
+.rotate-editor-frame{
+  position:relative; max-width:min(82vw,60vh); max-height:min(82vw,60vh);
+  width:min(82vw,60vh); height:min(82vw,60vh);
+  transition:transform .32s cubic-bezier(.2,.8,.2,1);
+}
+.rotate-editor-frame img{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block;
+}
+/* ---- Crop box — a real, draggable/resizable selection sitting on top
+   of the picture inside the rotate/crop stage. The box itself is
+   grab-able (move the whole selection); the four corner dots resize it
+   from that corner, anchored on the opposite one. Works with mouse,
+   touch and pen through the same Pointer Events code — on a computer
+   the cursor turns into an open hand over the box and a closed fist
+   while actively dragging, exactly like a native crop tool. ---- */
+.crop-box{
+  position:absolute; box-sizing:border-box; border:1.5px solid #fff;
+  cursor:grab; touch-action:none; z-index:1;
+}
+.crop-box.dragging{cursor:grabbing;}
+.crop-grid-line{position:absolute; background:rgba(255,255,255,.45); pointer-events:none;}
+.crop-grid-v1{left:33.333%; top:0; bottom:0; width:1px;}
+.crop-grid-v2{left:66.666%; top:0; bottom:0; width:1px;}
+.crop-grid-h1{top:33.333%; left:0; right:0; height:1px;}
+.crop-grid-h2{top:66.666%; left:0; right:0; height:1px;}
+.crop-handle{
+  position:absolute; width:20px; height:20px; margin:-10px;
+  border-radius:50%; background:#fff; border:2px solid rgba(0,0,0,.3);
+  box-shadow:0 1px 3px rgba(0,0,0,.35); touch-action:none; z-index:2;
+}
+.crop-handle.corner-tl{top:0; left:0; cursor:nwse-resize;}
+.crop-handle.corner-br{bottom:0; right:0; cursor:nwse-resize;}
+.crop-handle.corner-tr{top:0; right:0; cursor:nesw-resize;}
+.crop-handle.corner-bl{bottom:0; left:0; cursor:nesw-resize;}
+.rotate-editor-bottom{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 26px calc(18px + env(safe-area-inset-bottom));
+}
+.rotate-editor-text-btn{
+  background:none; border:none; color:#22c55e; font-family:var(--font-body);
+  font-size:15px; font-weight:700; cursor:pointer; padding:8px 4px;
+}
+.rotate-editor-rotate-btn{
+  width:46px; height:46px; border-radius:50%; flex-shrink:0; cursor:pointer;
+  background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.2); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+}
+
 /* desktop / wide screens: tool row becomes a vertical strip on the side
    instead of sitting across the top */
 @media (min-width:768px){

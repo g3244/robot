@@ -2715,6 +2715,7 @@ function openMediaLightbox(src, kind){
     vidEl.pause(); vidEl.src = ""; vidEl.classList.add("hidden");
     imgEl.src = src; imgEl.classList.remove("hidden");
   }
+  $("#imageLightbox").classList.remove("ui-hidden");
   $("#imageLightbox").classList.remove("hidden");
 }
 function openLightbox(src){ openMediaLightbox(src, "image"); }
@@ -2805,7 +2806,16 @@ $("#lightboxSaveBtn").addEventListener("click", (e)=>{
   saveLightboxMediaToDevice();
 });
 $("#imageLightbox").addEventListener("click", e=>{
-  if(e.target.id === "imageLightbox") closeLightbox();
+  if(e.target.id === "imageLightbox"){
+    /* tapping the bare backdrop hides/shows the × and ⋮ controls
+       instead of exiting the viewer — if the menu's open, the first
+       tap just closes that instead of also toggling the buttons */
+    if(!$("#lightboxMenu").classList.contains("hidden")){
+      $("#lightboxMenu").classList.add("hidden");
+    } else {
+      $("#imageLightbox").classList.toggle("ui-hidden");
+    }
+  }
   else if(!e.target.closest(".lightbox-menu") && !e.target.closest("#lightboxMenuBtn")){
     $("#lightboxMenu").classList.add("hidden");
   }
@@ -2954,6 +2964,7 @@ function imageBubbleHTML(m, docId, kind){
   return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}">
     <div class="msg-image-ph"></div>
     ${mediaTag}
+    ${m.hd ? `<span class="msg-hd-badge">HD</span>` : ""}
     <div class="msg-image-overlay">
       <div class="msg-image-progress${state === "downloading" ? "" : " hidden"}">
         <svg class="msg-image-ring" viewBox="0 0 48 48">
@@ -6044,7 +6055,7 @@ $("#messages").addEventListener("click", (e)=>{
    progress, then this bubble stays on screen exactly as-is (ring gone)
    until the messages listener swaps it for the real, synced bubble. */
 const imageUploadTasks = new Map(); // tempId -> Cloudinary upload task, so the × can cancel it
-function appendPendingImageBubble(tempId, localUrl, kind, caption){
+function appendPendingImageBubble(tempId, localUrl, kind, caption, hd){
   kind = kind || "image";
   const msgsBox = $("#messages");
   const bubble = document.createElement("div");
@@ -6056,6 +6067,7 @@ function appendPendingImageBubble(tempId, localUrl, kind, caption){
   bubble.innerHTML = `
     <div class="msg-image" data-kind="${kind}" data-state="uploading" data-tempid="${tempId}">
       ${mediaTag}
+      ${hd ? `<span class="msg-hd-badge">HD</span>` : ""}
       <div class="msg-image-overlay">
         <div class="msg-image-progress">
           <svg class="msg-image-ring" viewBox="0 0 48 48">
@@ -6652,11 +6664,11 @@ $("#closePollVotersBtn").addEventListener("click", ()=>{
   currentVotersMsgId = null;
 });
 
-async function sendImageFile(file, caption){
+async function sendImageFile(file, caption, hd){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   const localUrl = URL.createObjectURL(file);
-  appendPendingImageBubble(tempId, localUrl, "image", caption);
+  appendPendingImageBubble(tempId, localUrl, "image", caption, hd);
   try{
     const task = uploadToCloudinary(file, {
       folder: `images/${activeChatId}`,
@@ -6672,6 +6684,7 @@ async function sendImageFile(file, caption){
       senderId: currentUser.id, type:"image", imageUrl:url, imageSize:file.size,
       status: isAiChat ? "read" : "sent",
       ...(caption ? { caption } : {}),
+      ...(hd ? { hd: true } : {}),
       ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -6704,11 +6717,11 @@ async function sendImageFile(file, caption){
 
 /* Same as sendImageFile, but for a video — same pending bubble, same
    upload ring/×, same in-site lightbox on tap once it's done. */
-async function sendVideoFile(file, caption){
+async function sendVideoFile(file, caption, hd){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   const localUrl = URL.createObjectURL(file);
-  appendPendingImageBubble(tempId, localUrl, "video", caption);
+  appendPendingImageBubble(tempId, localUrl, "video", caption, hd);
   try{
     const task = uploadToCloudinary(file, {
       folder: `videos/${activeChatId}`,
@@ -6724,6 +6737,7 @@ async function sendVideoFile(file, caption){
       senderId: currentUser.id, type:"video", videoUrl:url, videoSize:file.size,
       status: isAiChat ? "read" : "sent",
       ...(caption ? { caption } : {}),
+      ...(hd ? { hd: true } : {}),
       ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -6796,20 +6810,362 @@ async function sendGenericFile(file, caption){
    Pre-send preview overlay — a full black page shown after picking an
    image, video, or generic file (NOT a live-recorded voice note, which
    still sends straight away), letting the person add a caption before
-   it actually goes out. The row of edit-style icons at the top (mirrors
-   how most chat apps present this) is decorative only — no crop/HD/
-   draw/text editing is implemented — except the × (cancel) and the
-   send button, which are real.
+   it actually goes out. Download and HD are real, working buttons for
+   images/videos; rotate is real for images (opens a dedicated rotate
+   page); text/draw stay decorative.
    ===================================================================== */
 let pendingSendFile = null;
 let pendingSendKind = "";       // "image" | "video" | "file"
 let pendingSendObjectUrl = "";
+let pendingSendHD = false;      // is HD currently toggled on for this item
+let pendingSendHDSupported = false; // does the picked media even qualify as HD
+let pendingImageRotation = 0;   // committed rotation for the current image: 0/90/180/270
+let pendingCropRect = null;     // committed crop, normalized 0..1 against the ORIGINAL image: {x,y,w,h}
+
+const HD_MIN_LONG_EDGE = 1280;  // longer side, px
+const HD_MIN_SHORT_EDGE = 720;  // shorter side, px — covers portrait media too
+
+function setHDButtonState(supported, active){
+  const btn = $("#sendPreviewHDBtn");
+  if(!btn) return;
+  btn.classList.toggle("hd-unsupported", !supported);
+  btn.classList.toggle("hd-active", !!(supported && active));
+}
+
+/* Figures out whether the picked photo/video is actually big enough to
+   count as HD, then enables/dims the HD button accordingly. Images
+   resolve instantly via a throwaway Image(); videos need their metadata
+   to load first to know their real pixel dimensions. */
+function evaluateHDSupport(kind){
+  pendingSendHDSupported = false;
+  pendingSendHD = false;
+  setHDButtonState(false, false);
+  if(kind === "image"){
+    const probe = new Image();
+    probe.onload = ()=>{
+      const longEdge = Math.max(probe.naturalWidth, probe.naturalHeight);
+      const shortEdge = Math.min(probe.naturalWidth, probe.naturalHeight);
+      pendingSendHDSupported = longEdge >= HD_MIN_LONG_EDGE && shortEdge >= HD_MIN_SHORT_EDGE;
+      setHDButtonState(pendingSendHDSupported, false);
+    };
+    probe.src = pendingSendObjectUrl;
+  } else if(kind === "video"){
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = ()=>{
+      const longEdge = Math.max(probe.videoWidth, probe.videoHeight);
+      const shortEdge = Math.min(probe.videoWidth, probe.videoHeight);
+      pendingSendHDSupported = longEdge >= HD_MIN_LONG_EDGE && shortEdge >= HD_MIN_SHORT_EDGE;
+      setHDButtonState(pendingSendHDSupported, false);
+    };
+    probe.src = pendingSendObjectUrl;
+  }
+}
+
+$("#sendPreviewDownloadBtn").addEventListener("click", async ()=>{
+  if(!pendingSendFile || !pendingSendObjectUrl) return;
+  /* If the picture's been cropped/rotated in the rotate editor, download
+     should save that edited version — not the original file as picked. */
+  let fileToSave = pendingSendFile;
+  if(pendingSendKind === "image" && pendingCropRect) fileToSave = await cropImageFile(fileToSave, pendingCropRect);
+  if(pendingSendKind === "image" && pendingImageRotation) fileToSave = await rotateImageFile(fileToSave, pendingImageRotation);
+  const url = fileToSave === pendingSendFile ? pendingSendObjectUrl : URL.createObjectURL(fileToSave);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = pendingSendFile.name || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if(url !== pendingSendObjectUrl) URL.revokeObjectURL(url);
+});
+
+$("#sendPreviewHDBtn").addEventListener("click", ()=>{
+  if(!pendingSendHDSupported) return;
+  pendingSendHD = !pendingSendHD;
+  setHDButtonState(true, pendingSendHD);
+  if(pendingSendHD){
+    toast(pendingSendKind === "video" ? "تم تفعيل HD على الفيديو" : "تم تفعيل HD على الصورة");
+  }
+});
+
+/* ---- Rotate/crop editor (image only) — opened from the rotate icon in
+   the preview toolbar. A real crop box sits over the picture: drag its
+   body to move the selection, drag a corner dot to resize it (anchored
+   on the opposite corner). The middle button spins the whole thing 90°
+   per tap — the box rotates together with the picture since both live
+   inside the same rotated frame. Cancel walks away with no change kept;
+   Save commits both the rotation and the crop back onto the preview. ---- */
+let rotateEditorTempRotation = 0;
+let cropImgRect = null;   // {x,y,w,h} — image's rendered box inside the (unrotated) frame
+let cropBoxRect = null;   // {x,y,w,h} — current selection, same frame-local coordinate space
+let cropDrag = null;      // {type:'move'|'corner', corner, startX, startY, startRect}
+const CROP_MIN_SIZE_RATIO = 0.15;
+
+function applyPreviewRotationCSS(){
+  const previewImg = document.querySelector("#sendPreviewMedia img");
+  if(previewImg) previewImg.style.transform = pendingImageRotation ? `rotate(${pendingImageRotation}deg)` : "";
+}
+let pendingPreviewObjectUrl = ""; // what the small preview thumbnail actually shows — regenerated
+                                   // from the ORIGINAL file whenever a crop/rotation is committed,
+                                   // so "حفظ" visibly reflects the edit instead of showing the
+                                   // untouched picture with just a CSS spin on top.
+async function refreshSendPreviewThumbnail(){
+  if(pendingSendKind !== "image" || !pendingSendFile) return;
+  const cropAtStart = pendingCropRect, rotationAtStart = pendingImageRotation;
+  let displayFile = pendingSendFile;
+  if(cropAtStart) displayFile = await cropImageFile(displayFile, cropAtStart);
+  if(rotationAtStart) displayFile = await rotateImageFile(displayFile, rotationAtStart);
+  /* if the person reopened the editor and changed things again while
+     this was running, don't stomp the newer result with a stale one */
+  if(cropAtStart !== pendingCropRect || rotationAtStart !== pendingImageRotation) return;
+  const newUrl = (cropAtStart || rotationAtStart) ? URL.createObjectURL(displayFile) : pendingSendObjectUrl;
+  if(pendingPreviewObjectUrl && pendingPreviewObjectUrl !== pendingSendObjectUrl && pendingPreviewObjectUrl !== newUrl){
+    URL.revokeObjectURL(pendingPreviewObjectUrl);
+  }
+  pendingPreviewObjectUrl = newUrl;
+  const previewImg = document.querySelector("#sendPreviewMedia img");
+  if(previewImg){ previewImg.style.transform = ""; previewImg.src = pendingPreviewObjectUrl; }
+}
+function applyRotateEditorTransform(){
+  const frame = $("#rotateEditorFrame");
+  if(frame) frame.style.transform = `rotate(${rotateEditorTempRotation}deg)`;
+}
+
+/* Where the picture actually lands inside the square frame (object-fit:
+   contain math) — the crop box is only ever allowed to live inside this
+   rect, never over the empty letterbox strips. */
+function computeCropImageRect(){
+  const frame = $("#rotateEditorFrame");
+  const img = $("#rotateEditorImg");
+  const F = frame.clientWidth || 1;
+  const nw = img.naturalWidth || F, nh = img.naturalHeight || F;
+  const scale = Math.min(F / nw, F / nh);
+  const w = nw * scale, h = nh * scale;
+  return { x: (F - w) / 2, y: (F - h) / 2, w, h };
+}
+function renderCropBox(){
+  const box = $("#cropBox");
+  if(!box || !cropBoxRect) return;
+  box.style.left = cropBoxRect.x + "px";
+  box.style.top = cropBoxRect.y + "px";
+  box.style.width = cropBoxRect.w + "px";
+  box.style.height = cropBoxRect.h + "px";
+}
+function clampMoveRect(rect){
+  const img = cropImgRect;
+  let {x,y,w,h} = rect;
+  x = Math.max(img.x, Math.min(x, img.x + img.w - w));
+  y = Math.max(img.y, Math.min(y, img.y + img.h - h));
+  return {x,y,w,h};
+}
+function clampResizeRect(corner, rect){
+  const img = cropImgRect;
+  const minSize = Math.max(24, Math.min(img.w, img.h) * CROP_MIN_SIZE_RATIO);
+  let {x,y,w,h} = rect;
+  if(w < minSize){ if(corner === "tl" || corner === "bl") x -= (minSize - w); w = minSize; }
+  if(h < minSize){ if(corner === "tl" || corner === "tr") y -= (minSize - h); h = minSize; }
+  if(corner === "br"){
+    w = Math.min(w, img.x + img.w - x);
+    h = Math.min(h, img.y + img.h - y);
+  } else if(corner === "tl"){
+    if(x < img.x){ w -= (img.x - x); x = img.x; }
+    if(y < img.y){ h -= (img.y - y); y = img.y; }
+  } else if(corner === "tr"){
+    w = Math.min(w, img.x + img.w - x);
+    if(y < img.y){ h -= (img.y - y); y = img.y; }
+  } else if(corner === "bl"){
+    if(x < img.x){ w -= (img.x - x); x = img.x; }
+    h = Math.min(h, img.y + img.h - y);
+  }
+  w = Math.max(minSize, w);
+  h = Math.max(minSize, h);
+  return {x,y,w,h};
+}
+/* Screen-space pointer movement has to be un-rotated back into the
+   frame's own coordinate space whenever the picture is turned 90/180/
+   270° — otherwise dragging "right" on screen would move the box in
+   the wrong direction once the frame itself is rotated. */
+function toLocalDelta(dx, dy){
+  const theta = (-rotateEditorTempRotation * Math.PI) / 180;
+  const cos = Math.cos(theta), sin = Math.sin(theta);
+  return { dx: dx * cos - dy * sin, dy: dx * sin + dy * cos };
+}
+function startCropDrag(e, type, corner){
+  e.preventDefault();
+  e.stopPropagation();
+  cropDrag = { type, corner, startX: e.clientX, startY: e.clientY, startRect: { ...cropBoxRect } };
+  $("#cropBox").classList.add("dragging");
+  const el = e.currentTarget;
+  if(el.setPointerCapture) el.setPointerCapture(e.pointerId);
+}
+function onCropDragMove(e){
+  if(!cropDrag) return;
+  const { dx, dy } = toLocalDelta(e.clientX - cropDrag.startX, e.clientY - cropDrag.startY);
+  const s = cropDrag.startRect;
+  let next;
+  if(cropDrag.type === "move"){
+    next = clampMoveRect({ x: s.x + dx, y: s.y + dy, w: s.w, h: s.h });
+  } else {
+    let {x,y,w,h} = s;
+    if(cropDrag.corner === "br"){ w = s.w + dx; h = s.h + dy; }
+    else if(cropDrag.corner === "tl"){ x = s.x + dx; y = s.y + dy; w = s.w - dx; h = s.h - dy; }
+    else if(cropDrag.corner === "tr"){ y = s.y + dy; w = s.w + dx; h = s.h - dy; }
+    else if(cropDrag.corner === "bl"){ x = s.x + dx; w = s.w - dx; h = s.h + dy; }
+    next = clampResizeRect(cropDrag.corner, {x,y,w,h});
+  }
+  cropBoxRect = next;
+  renderCropBox();
+}
+function endCropDrag(){
+  cropDrag = null;
+  const box = $("#cropBox");
+  if(box) box.classList.remove("dragging");
+}
+(function initCropDragHandlers(){
+  const box = $("#cropBox");
+  if(!box) return;
+  box.addEventListener("pointerdown", (e)=>{
+    if(e.target.closest(".crop-handle")) return;
+    startCropDrag(e, "move");
+  });
+  box.addEventListener("pointermove", onCropDragMove);
+  box.addEventListener("pointerup", endCropDrag);
+  box.addEventListener("pointercancel", endCropDrag);
+  $$(".crop-handle", box).forEach((handle)=>{
+    handle.addEventListener("pointerdown", (e)=> startCropDrag(e, "corner", handle.dataset.corner));
+    handle.addEventListener("pointermove", onCropDragMove);
+    handle.addEventListener("pointerup", endCropDrag);
+    handle.addEventListener("pointercancel", endCropDrag);
+  });
+})();
+
+function openRotateEditor(){
+  if(pendingSendKind !== "image" || !pendingSendObjectUrl) return;
+  rotateEditorTempRotation = pendingImageRotation;
+  const img = $("#rotateEditorImg");
+  applyRotateEditorTransform();
+  $("#rotateEditorOverlay").classList.remove("hidden");
+  const setupCropBox = ()=>{
+    cropImgRect = computeCropImageRect();
+    if(pendingCropRect){
+      cropBoxRect = clampMoveRect({
+        x: cropImgRect.x + pendingCropRect.x * cropImgRect.w,
+        y: cropImgRect.y + pendingCropRect.y * cropImgRect.h,
+        w: pendingCropRect.w * cropImgRect.w,
+        h: pendingCropRect.h * cropImgRect.h
+      });
+    } else {
+      cropBoxRect = { x: cropImgRect.x, y: cropImgRect.y, w: cropImgRect.w, h: cropImgRect.h };
+    }
+    renderCropBox();
+  };
+  if(img.src !== pendingSendObjectUrl){
+    img.onload = setupCropBox;
+    img.src = pendingSendObjectUrl;
+  } else if(img.complete && img.naturalWidth){
+    setupCropBox();
+  } else {
+    img.onload = setupCropBox;
+  }
+}
+function closeRotateEditor(){
+  $("#rotateEditorOverlay").classList.add("hidden");
+}
+$("#sendPreviewRotateBtn").addEventListener("click", openRotateEditor);
+$("#rotateEditorRotateBtn").addEventListener("click", ()=>{
+  rotateEditorTempRotation = (rotateEditorTempRotation + 90) % 360;
+  applyRotateEditorTransform();
+});
+$("#rotateEditorCancelBtn").addEventListener("click", ()=>{
+  /* walk away — whatever was spun/cropped in here while open is thrown
+     away, the preview keeps whichever rotation/crop it had before this
+     was opened */
+  closeRotateEditor();
+});
+$("#rotateEditorDoneBtn").addEventListener("click", ()=>{
+  pendingImageRotation = rotateEditorTempRotation;
+  if(cropImgRect && cropBoxRect){
+    pendingCropRect = {
+      x: (cropBoxRect.x - cropImgRect.x) / cropImgRect.w,
+      y: (cropBoxRect.y - cropImgRect.y) / cropImgRect.h,
+      w: cropBoxRect.w / cropImgRect.w,
+      h: cropBoxRect.h / cropImgRect.h
+    };
+    /* selection covers ~the whole picture -> same as "no crop" */
+    if(pendingCropRect.w > 0.98 && pendingCropRect.h > 0.98) pendingCropRect = null;
+  }
+  applyPreviewRotationCSS();
+  closeRotateEditor();
+  refreshSendPreviewThumbnail();
+});
+
+/* Actually rotates the pixels of an image File using a canvas, so the
+   file that gets uploaded matches what the rotate editor showed —
+   not just a CSS transform on the local preview. */
+function rotateImageFile(file, degrees){
+  return new Promise((resolve)=>{
+    const normalized = ((degrees % 360) + 360) % 360;
+    if(!normalized){ resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const swap = normalized === 90 || normalized === 270;
+      const canvas = document.createElement("canvas");
+      canvas.width = swap ? img.naturalHeight : img.naturalWidth;
+      canvas.height = swap ? img.naturalWidth : img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((normalized * Math.PI) / 180);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob)=>{
+        if(!blob){ resolve(file); return; }
+        resolve(new File([blob], file.name, { type: file.type || "image/jpeg" }));
+      }, file.type || "image/jpeg", 0.95);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+/* Actually crops the pixels of an image File using a canvas. rectNorm is
+   {x,y,w,h} normalized 0..1 against the file's own natural dimensions —
+   exactly what the crop box in the rotate/crop editor produces. */
+function cropImageFile(file, rectNorm){
+  return new Promise((resolve)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const nw = img.naturalWidth, nh = img.naturalHeight;
+      const sx = Math.round(rectNorm.x * nw);
+      const sy = Math.round(rectNorm.y * nh);
+      const sw = Math.max(1, Math.round(rectNorm.w * nw));
+      const sh = Math.max(1, Math.round(rectNorm.h * nh));
+      const canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob)=>{
+        if(!blob){ resolve(file); return; }
+        resolve(new File([blob], file.name, { type: file.type || "image/jpeg" }));
+      }, file.type || "image/jpeg", 0.95);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 function openSendPreview(file, kind){
   pendingSendFile = file;
   pendingSendKind = kind;
+  pendingImageRotation = 0;
+  pendingCropRect = null;
   if(pendingSendObjectUrl){ URL.revokeObjectURL(pendingSendObjectUrl); }
   pendingSendObjectUrl = URL.createObjectURL(file);
+  if(pendingPreviewObjectUrl && pendingPreviewObjectUrl !== pendingSendObjectUrl){ URL.revokeObjectURL(pendingPreviewObjectUrl); }
+  pendingPreviewObjectUrl = pendingSendObjectUrl;
 
   const mediaBox = $("#sendPreviewMedia");
   if(kind === "image"){
@@ -6823,6 +7179,7 @@ function openSendPreview(file, kind){
       <span class="send-preview-file-size">${fmtFileSize(file.size)}</span>
     </div>`;
   }
+  evaluateHDSupport(kind);
   const overlay = $("#sendPreviewOverlay");
   /* kind-image  -> full edit toolbar (download / HD / rotate / text / draw)
      kind-video  -> same page, no rotate icon
@@ -6848,18 +7205,32 @@ function closeSendPreview(){
     overlay.classList.add("hidden");
     $("#sendPreviewMedia").innerHTML = "";
   }, 220);
+  if(pendingPreviewObjectUrl && pendingPreviewObjectUrl !== pendingSendObjectUrl){ URL.revokeObjectURL(pendingPreviewObjectUrl); }
+  pendingPreviewObjectUrl = "";
   if(pendingSendObjectUrl){ URL.revokeObjectURL(pendingSendObjectUrl); pendingSendObjectUrl = ""; }
   pendingSendFile = null;
   pendingSendKind = "";
+  pendingSendHD = false;
+  pendingSendHDSupported = false;
+  pendingImageRotation = 0;
+  pendingCropRect = null;
+  setHDButtonState(false, false);
   $("#sendPreviewCaption").value = "";
 }
-function confirmSendPreview(){
+async function confirmSendPreview(){
   const file = pendingSendFile, kind = pendingSendKind;
+  const hd = pendingSendHD && pendingSendHDSupported;
+  const rotation = pendingImageRotation;
+  const cropRect = pendingCropRect;
   const caption = $("#sendPreviewCaption").value.trim();
   closeSendPreview();
   if(!file) return;
-  if(kind === "image") sendImageFile(file, caption);
-  else if(kind === "video") sendVideoFile(file, caption);
+  if(kind === "image"){
+    let finalFile = cropRect ? await cropImageFile(file, cropRect) : file;
+    if(rotation) finalFile = await rotateImageFile(finalFile, rotation);
+    sendImageFile(finalFile, caption, hd);
+  }
+  else if(kind === "video") sendVideoFile(file, caption, hd);
   else sendGenericFile(file, caption);
 }
 $("#sendPreviewCloseBtn").addEventListener("click", closeSendPreview);
