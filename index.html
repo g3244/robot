@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>وصلة · دردشة</title>
 
 <!-- ---- app icon: browser tab, bookmarks, and "install/add to home
@@ -1598,8 +1598,24 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
       <span>حفظ في الجهاز</span>
     </button>
   </div>
-  <img id="lightboxImg" src="" alt="">
-  <video id="lightboxVideo" class="hidden" src="" controls playsinline></video>
+
+  <!-- ---- mobile-only top bar: replaces the ×/⋮ buttons above with a
+       WhatsApp-style header (back arrow + name + time) once the screen
+       is phone-width. Only these three things ever go in here. ---- -->
+  <div class="lightbox-hotbar" id="lightboxHotbar">
+    <button type="button" class="lightbox-hotbar-back" id="lightboxHotbarBack" title="رجوع">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <div class="lightbox-hotbar-info">
+      <strong id="lightboxHotbarName">—</strong>
+      <span id="lightboxHotbarTime" class="hidden"></span>
+    </div>
+  </div>
+
+  <div class="lightbox-media">
+    <img id="lightboxImg" src="" alt="">
+    <video id="lightboxVideo" class="hidden" src="" controls playsinline></video>
+  </div>
 </div>
 
 <!-- ---- Right-click / long-press context menu for a message ---- -->

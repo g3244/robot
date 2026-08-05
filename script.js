@@ -423,6 +423,24 @@ function fmtTime(ts){
   return d.toLocaleTimeString("ar-EG", {hour:"2-digit", minute:"2-digit"});
 }
 
+/* "النهاردة، 2:37 ص" / "إمبارح، ..." / day name / full date — used in the
+   media-lightbox hotbar under the sender's name, same day-label logic
+   as formatLastSeen but time comes after the day instead of before. */
+function formatLightboxTime(ts){
+  if(!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if(isNaN(d.getTime())) return "";
+  const now = new Date();
+  const timeStr = d.toLocaleTimeString("ar-EG", {hour:"numeric", minute:"2-digit"});
+  const sameDay = (a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  if(sameDay(d, now)) return `النهاردة، ${timeStr}`;
+  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
+  if(sameDay(d, yesterday)) return `إمبارح، ${timeStr}`;
+  const daysAgo = Math.floor((now - d) / (24*60*60*1000));
+  if(daysAgo < 7) return `يوم ${d.toLocaleDateString("ar-EG", {weekday:"long"})}، ${timeStr}`;
+  return `${d.toLocaleDateString("ar-EG", {day:"numeric", month:"long"})}، ${timeStr}`;
+}
+
 /* =====================================================================
    1) GATE — multi-challenge verification
    3 random challenge types (text code / shape order / drag piece).
@@ -2682,7 +2700,7 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
   const img = $("#memberPeekAvatarImg");
   if(img.classList.contains("hidden") || !img.src) return;
   if(window.matchMedia("(min-width:768px)").matches){
-    openLightbox(img.src);
+    openLightbox(img.src, $("#memberPeekName").textContent);
   }else{
     $("#memberPeekSheet").classList.toggle("avatar-zoomed");
   }
@@ -2701,11 +2719,15 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
    backdrop (no page content bleeding through), with a "⋮" menu (top
    right) to save the current picture/video straight to the device. */
 let currentLightboxSrc = "", currentLightboxKind = "image";
-function openMediaLightbox(src, kind){
+/* info = optional { name, ts } shown in the mobile hotbar (name/back-
+   arrow always shown when known; the time line only appears if a ts
+   was given, since a profile photo has no message time to show). */
+function openMediaLightbox(src, kind, info){
   if(!src) return;
   const imgEl = $("#lightboxImg"), vidEl = $("#lightboxVideo");
   currentLightboxSrc = src; currentLightboxKind = kind || "image";
   $("#lightboxMenu").classList.add("hidden");
+  $("#imageLightbox").classList.remove("controls-hidden");
   if(kind === "video"){
     imgEl.src = ""; imgEl.classList.add("hidden");
     vidEl.src = src; vidEl.classList.remove("hidden");
@@ -2715,11 +2737,17 @@ function openMediaLightbox(src, kind){
     vidEl.pause(); vidEl.src = ""; vidEl.classList.add("hidden");
     imgEl.src = src; imgEl.classList.remove("hidden");
   }
+  const hbName = (info && info.name) ? info.name : "";
+  const hbTimeLabel = (info && info.ts) ? formatLightboxTime(Number(info.ts)) : "";
+  $("#lightboxHotbarName").textContent = hbName || "—";
+  $("#lightboxHotbarTime").textContent = hbTimeLabel;
+  $("#lightboxHotbarTime").classList.toggle("hidden", !hbTimeLabel);
   $("#imageLightbox").classList.remove("hidden");
 }
-function openLightbox(src){ openMediaLightbox(src, "image"); }
+function openLightbox(src, name){ openMediaLightbox(src, "image", name ? { name } : null); }
 function closeLightbox(){
   $("#imageLightbox").classList.add("hidden");
+  $("#imageLightbox").classList.remove("controls-hidden");
   $("#lightboxMenu").classList.add("hidden");
   const vidEl = $("#lightboxVideo");
   vidEl.pause(); vidEl.src = "";
@@ -2765,9 +2793,10 @@ async function saveLightboxMediaToDevice(){
 }
 $("#peerProfileAvatarBig").addEventListener("click", ()=>{
   const img = $("#peerProfileAvatarImg");
-  if(!img.classList.contains("hidden") && img.src) openLightbox(img.src);
+  if(!img.classList.contains("hidden") && img.src) openLightbox(img.src, $("#peerProfileName").textContent);
 });
 $("#closeLightbox").addEventListener("click", closeLightbox);
+$("#lightboxHotbarBack").addEventListener("click", closeLightbox);
 $("#lightboxMenuBtn").addEventListener("click", (e)=>{
   e.stopPropagation();
   $("#lightboxMenu").classList.toggle("hidden");
@@ -2776,11 +2805,20 @@ $("#lightboxSaveBtn").addEventListener("click", (e)=>{
   e.stopPropagation();
   saveLightboxMediaToDevice();
 });
+/* Tapping the empty backdrop or the picture/video itself toggles the
+   controls (the mobile hotbar, or the ×/⋮ buttons on desktop) instead
+   of closing the viewer — closing now only happens via the back
+   arrow/× button. Tapping the hotbar or the ⋮ dropdown themselves is
+   left alone so their own buttons keep working normally. */
 $("#imageLightbox").addEventListener("click", e=>{
-  if(e.target.id === "imageLightbox") closeLightbox();
-  else if(!e.target.closest(".lightbox-menu") && !e.target.closest("#lightboxMenuBtn")){
+  if(e.target.closest(".lightbox-menu") || e.target.closest("#lightboxMenuBtn")) return;
+  if(e.target.closest("#lightboxHotbar")) return;
+  if(e.target.id === "imageLightbox" || e.target.closest(".lightbox-media")){
+    $("#imageLightbox").classList.toggle("controls-hidden");
     $("#lightboxMenu").classList.add("hidden");
+    return;
   }
+  $("#lightboxMenu").classList.add("hidden");
 });
 
 /* =====================================================================
@@ -2882,6 +2920,16 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
 const imageBlobCache = new Map();     // msg doc id -> blob: URL (or the original URL as a no-progress fallback)
 const imageDownloadState = new Map(); // msg doc id -> { progress, controller }
 
+/* who/when to show in the lightbox hotbar once this picture/video is
+   opened full-screen — "انت" for my own sends, otherwise the sender's
+   name (looked up per group member in a group chat, or just the peer
+   in a 1:1 chat), plus the message's own timestamp. */
+function lightboxSenderLabel(m){
+  if(!m) return "";
+  if(m.senderId === currentUser.id) return "انت";
+  if(activeChatPeer && activeChatPeer.isGroup) return groupMemberInfo(m.senderId).name || "عضو";
+  return activeChatPeer ? peerDisplayName(activeChatPeer) : "";
+}
 function imageBubbleHTML(m, docId, kind){
   kind = kind || "image";
   const mediaUrl = kind === "video" ? (m.videoUrl || "") : (m.imageUrl || "");
@@ -2893,7 +2941,9 @@ function imageBubbleHTML(m, docId, kind){
   const mediaTag = kind === "video"
     ? `<video class="msg-image-img${state === "done" ? "" : " hidden"}" ${state === "done" ? `src="${escapeHtml(cachedUrl)}"` : ""} muted playsinline></video><span class="msg-video-play">${VOICE_PLAY_ICON}</span>`
     : `<img class="msg-image-img${state === "done" ? "" : " hidden"}" src="${state === "done" ? escapeHtml(cachedUrl) : ""}" alt="صورة">`;
-  return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}">
+  const senderLabel = lightboxSenderLabel(m);
+  const tsMillis = m.ts ? (m.ts.toMillis ? m.ts.toMillis() : new Date(m.ts).getTime()) : "";
+  return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}" data-sender="${escapeHtml(senderLabel)}" data-ts="${tsMillis}">
     <div class="msg-image-ph"></div>
     ${mediaTag}
     <div class="msg-image-overlay">
@@ -6079,7 +6129,10 @@ $("#messages").addEventListener("click", (e)=>{
   }
   const imgWrap = e.target.closest(".msg-image");
   if(imgWrap && imgWrap.dataset.state === "done" && imgWrap.dataset.url){
-    openMediaLightbox(imgWrap.dataset.url, imgWrap.dataset.kind || "image");
+    openMediaLightbox(imgWrap.dataset.url, imgWrap.dataset.kind || "image", {
+      name: imgWrap.dataset.sender || "",
+      ts: imgWrap.dataset.ts || ""
+    });
     return;
   }
   const fileWrap = e.target.closest(".msg-file");
