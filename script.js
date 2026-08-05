@@ -2695,14 +2695,28 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
 
 
 
-/* ---------------- fullscreen image lightbox ---------------- */
-function openLightbox(src){
+/* ---------------- fullscreen image/video lightbox ----------------
+   Opens pictures AND videos right here on the site — nothing ever
+   navigates to Cloudinary's raw URL in a new tab/window. */
+function openMediaLightbox(src, kind){
   if(!src) return;
-  $("#lightboxImg").src = src;
+  const imgEl = $("#lightboxImg"), vidEl = $("#lightboxVideo");
+  if(kind === "video"){
+    imgEl.src = ""; imgEl.classList.add("hidden");
+    vidEl.src = src; vidEl.classList.remove("hidden");
+    vidEl.currentTime = 0;
+    vidEl.play().catch(()=>{});
+  } else {
+    vidEl.pause(); vidEl.src = ""; vidEl.classList.add("hidden");
+    imgEl.src = src; imgEl.classList.remove("hidden");
+  }
   $("#imageLightbox").classList.remove("hidden");
 }
+function openLightbox(src){ openMediaLightbox(src, "image"); }
 function closeLightbox(){
   $("#imageLightbox").classList.add("hidden");
+  const vidEl = $("#lightboxVideo");
+  vidEl.pause(); vidEl.src = "";
   $("#lightboxImg").src = "";
 }
 $("#peerProfileAvatarBig").addEventListener("click", ()=>{
@@ -2813,15 +2827,20 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
 const imageBlobCache = new Map();     // msg doc id -> blob: URL (or the original URL as a no-progress fallback)
 const imageDownloadState = new Map(); // msg doc id -> { progress, controller }
 
-function imageBubbleHTML(m, docId){
+function imageBubbleHTML(m, docId, kind){
+  kind = kind || "image";
+  const mediaUrl = kind === "video" ? (m.videoUrl || "") : (m.imageUrl || "");
   const cachedUrl = imageBlobCache.get(docId);
   const state = cachedUrl ? "done" : "downloading";
   const inFlight = imageDownloadState.get(docId);
   const progress = inFlight ? inFlight.progress : 0;
   const offset = (RING_CIRCUMFERENCE * (1 - Math.min(100, progress) / 100)).toFixed(2);
-  return `<div class="msg-image" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(m.imageUrl||"")}">
+  const mediaTag = kind === "video"
+    ? `<video class="msg-image-img${state === "done" ? "" : " hidden"}" ${state === "done" ? `src="${escapeHtml(cachedUrl)}"` : ""} muted playsinline></video><span class="msg-video-play">${VOICE_PLAY_ICON}</span>`
+    : `<img class="msg-image-img${state === "done" ? "" : " hidden"}" src="${state === "done" ? escapeHtml(cachedUrl) : ""}" alt="صورة">`;
+  return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}">
     <div class="msg-image-ph"></div>
-    <img class="msg-image-img${state === "done" ? "" : " hidden"}" src="${state === "done" ? escapeHtml(cachedUrl) : ""}" alt="صورة">
+    ${mediaTag}
     <div class="msg-image-overlay">
       <div class="msg-image-progress${state === "downloading" ? "" : " hidden"}">
         <svg class="msg-image-ring" viewBox="0 0 48 48">
@@ -3470,6 +3489,8 @@ async function openChat(peer){
             </div>`;
           } else if(m.type === "image"){
             inner += imageBubbleHTML(m, doc.id);
+          } else if(m.type === "video"){
+            inner += imageBubbleHTML(m, doc.id, "video");
           } else if(m.type === "file"){
             inner += `<div class="msg-file" data-url="${escapeHtml(m.fileUrl||"")}">
               <span class="msg-file-icon">${FILE_ICON}</span>
@@ -5791,6 +5812,12 @@ function resolvePendingMessageBubble(tempId){
    uploading — shows a disabled player at the final duration right away,
    then gets swapped for the real bubble once the messages listener
    picks up the confirmed Firestore doc (or removed on upload failure). */
+/* While the voice note itself uploads, the play button sits disabled
+   underneath a small progress ring (same idea as the picture/video
+   ring, just smaller) with an always-visible × to cancel the send. */
+const VOICE_RING_R = 15;
+const VOICE_RING_CIRCUMFERENCE = 2 * Math.PI * VOICE_RING_R;
+const voiceUploadTasks = new Map(); // tempId -> Cloudinary upload task, so the × can cancel it
 function appendPendingVoiceBubble(tempId, durationSec){
   const msgsBox = $("#messages");
   const bubble = document.createElement("div");
@@ -5798,7 +5825,16 @@ function appendPendingVoiceBubble(tempId, durationSec){
   bubble.dataset.id = tempId;
   bubble.innerHTML = `
     <div class="msg-voice" data-duration="${durationSec}">
-      <button type="button" class="voice-play-btn" disabled>${VOICE_PLAY_ICON}</button>
+      <div class="msg-voice-playwrap" data-tempid="${tempId}">
+        <button type="button" class="voice-play-btn" disabled>${VOICE_PLAY_ICON}</button>
+        <div class="msg-voice-upload">
+          <svg class="msg-voice-ring" viewBox="0 0 36 36">
+            <circle class="ring-track" cx="18" cy="18" r="${VOICE_RING_R}"></circle>
+            <circle class="ring-bar" cx="18" cy="18" r="${VOICE_RING_R}" style="stroke-dasharray:${VOICE_RING_CIRCUMFERENCE.toFixed(2)}; stroke-dashoffset:${VOICE_RING_CIRCUMFERENCE.toFixed(2)}"></circle>
+          </svg>
+          <button type="button" class="msg-voice-cancel" title="إلغاء">${IMG_CLOSE_ICON}</button>
+        </div>
+      </div>
       <div class="voice-track"><div class="voice-track-fill"></div></div>
       <span class="voice-time">${fmtDuration(durationSec)}</span>
     </div>
@@ -5807,24 +5843,53 @@ function appendPendingVoiceBubble(tempId, durationSec){
   pendingBubbleNodes.set(tempId, bubble);
   setMsgsScrollTop(msgsBox, msgsBox.scrollHeight);
 }
+function updateVoiceUploadRingDOM(tempId, pct){
+  const wrap = $(`.msg-voice-playwrap[data-tempid="${cssEscapeId(tempId)}"]`);
+  if(!wrap) return;
+  const bar = wrap.querySelector(".ring-bar");
+  if(bar) bar.style.strokeDashoffset = (VOICE_RING_CIRCUMFERENCE * (1 - Math.min(100, pct) / 100)).toFixed(2);
+}
+function markVoiceUploadDone(tempId, remoteUrl){
+  const wrap = $(`.msg-voice-playwrap[data-tempid="${cssEscapeId(tempId)}"]`);
+  if(!wrap) return;
+  const upload = wrap.querySelector(".msg-voice-upload");
+  if(upload) upload.classList.add("hidden");
+  const btn = wrap.querySelector(".voice-play-btn");
+  if(btn){ btn.disabled = false; if(remoteUrl) btn.dataset.url = remoteUrl; }
+}
+function cancelVoiceUpload(tempId){
+  const task = voiceUploadTasks.get(tempId);
+  if(task){ try{ task.cancel(); }catch(e){} }
+}
+$("#messages").addEventListener("click", (e)=>{
+  const cancelBtn = e.target.closest(".msg-voice-cancel");
+  if(!cancelBtn) return;
+  const wrap = cancelBtn.closest(".msg-voice-playwrap");
+  if(wrap && wrap.dataset.tempid) cancelVoiceUpload(wrap.dataset.tempid);
+});
 
 /* Same idea as appendPendingMessageBubble/appendPendingVoiceBubble but for
-   an image still uploading — shows the local (blob:) preview blurred
-   right away with a circular upload-progress ring on top (× in the
-   middle doubles as "cancel upload"). sendImageFile() drives the ring
-   via updateUploadRingDOM/markImageUploadDone as the Storage upload
-   reports progress, then this bubble stays on screen exactly as-is
-   (unblurred, ring gone) until the messages listener swaps it for the
-   real, synced bubble. */
-const imageUploadTasks = new Map(); // tempId -> firebase Storage UploadTask, so the × can cancel it
-function appendPendingImageBubble(tempId, localUrl){
+   a picture (or a video — same treatment) still uploading — shows the
+   local (blob:) preview exactly as picked, right away, no blur, with a
+   circular upload-progress ring on top (× in the middle doubles as
+   "cancel upload" and always stays visible, no background behind it).
+   sendImageFile()/sendVideoFile() drive the ring via
+   updateUploadRingDOM/markImageUploadDone as the upload reports
+   progress, then this bubble stays on screen exactly as-is (ring gone)
+   until the messages listener swaps it for the real, synced bubble. */
+const imageUploadTasks = new Map(); // tempId -> Cloudinary upload task, so the × can cancel it
+function appendPendingImageBubble(tempId, localUrl, kind){
+  kind = kind || "image";
   const msgsBox = $("#messages");
   const bubble = document.createElement("div");
   bubble.className = "msg out pending";
   bubble.dataset.id = tempId;
+  const mediaTag = kind === "video"
+    ? `<video class="msg-image-img" src="${localUrl}" muted playsinline></video><span class="msg-video-play">${VOICE_PLAY_ICON}</span>`
+    : `<img class="msg-image-img" src="${localUrl}" alt="صورة">`;
   bubble.innerHTML = `
-    <div class="msg-image" data-state="uploading" data-tempid="${tempId}">
-      <img class="msg-image-img msg-image-blurred" src="${localUrl}" alt="صورة">
+    <div class="msg-image" data-kind="${kind}" data-state="uploading" data-tempid="${tempId}">
+      ${mediaTag}
       <div class="msg-image-overlay">
         <div class="msg-image-progress">
           <svg class="msg-image-ring" viewBox="0 0 48 48">
@@ -5852,11 +5917,8 @@ function markImageUploadDone(tempId, remoteUrl){
   wrap.dataset.state = "done";
   const overlay = wrap.querySelector(".msg-image-overlay");
   if(overlay) overlay.style.opacity = "0";
-  const img = wrap.querySelector(".msg-image-img");
-  if(img){
-    img.classList.remove("msg-image-blurred");
-    if(remoteUrl) img.src = remoteUrl;
-  }
+  const media = wrap.querySelector(".msg-image-img");
+  if(media && remoteUrl) media.src = remoteUrl;
 }
 function cancelImageUpload(tempId){
   const task = imageUploadTasks.get(tempId);
@@ -5937,11 +5999,12 @@ $("#messages").addEventListener("click", (e)=>{
   if(!btn || btn.disabled) return;
   toggleVoicePlayback(btn);
 });
-/* Images now download/upload automatically the moment they appear — no
-   tap needed to start. Tapping the progress ring while it's running just
-   reveals the × (tap again / tap × itself to actually cancel); tapping
-   it while paused resumes. Tapping a fully-loaded image opens it full
-   size. Files keep their simpler "tap to open/download" behavior. */
+/* Pictures/videos download/upload automatically the moment they appear —
+   no tap needed to start. The × cancel button is always visible (no
+   tap-to-reveal step); tapping the ring itself while paused resumes.
+   Tapping a fully-loaded picture or video opens it right here on the
+   site (see openMediaLightbox), never in a new tab/another site. Files
+   keep their simpler "tap to open/download" behavior. */
 $("#messages").addEventListener("click", (e)=>{
   const cancelBtn = e.target.closest(".msg-image-cancel");
   if(cancelBtn){
@@ -5954,17 +6017,14 @@ $("#messages").addEventListener("click", (e)=>{
   const progArea = e.target.closest(".msg-image-progress");
   if(progArea){
     const wrap = progArea.closest(".msg-image");
-    if(!wrap) return;
-    if(wrap.dataset.state === "paused" && wrap.dataset.msgid){
+    if(wrap && wrap.dataset.state === "paused" && wrap.dataset.msgid){
       startImageDownload(wrap.dataset.msgid, wrap.dataset.url);
-    } else {
-      progArea.classList.toggle("show-cancel");
     }
     return;
   }
   const imgWrap = e.target.closest(".msg-image");
   if(imgWrap && imgWrap.dataset.state === "done" && imgWrap.dataset.url){
-    window.open(imgWrap.dataset.url, "_blank");
+    openMediaLightbox(imgWrap.dataset.url, imgWrap.dataset.kind || "image");
     return;
   }
   const fileWrap = e.target.closest(".msg-file");
@@ -6148,8 +6208,14 @@ async function stopAndSendVoice(){
   try{
     const ext = mimeType.includes("mp4") ? "m4a" : (mimeType.includes("ogg") ? "ogg" : "webm");
     const voiceFile = new File([blob], `${tempId}.${ext}`, { type: mimeType });
-    const data = await uploadToCloudinary(voiceFile, { folder: `voice/${activeChatId}` }).promise;
+    const task = uploadToCloudinary(voiceFile, {
+      folder: `voice/${activeChatId}`,
+      onProgress: (pct)=> updateVoiceUploadRingDOM(tempId, pct)
+    });
+    voiceUploadTasks.set(tempId, task);
+    const data = await task.promise;
     const url = data.secure_url;
+    markVoiceUploadDone(tempId, url);
 
     const isAiChat = activeChatPeer.id === AI_PEER_ID;
     const msgPayload = {
@@ -6174,9 +6240,13 @@ async function stopAndSendVoice(){
     }, { merge:true });
     chatDocExistsForActive = true;
   }catch(err){
-    console.error(err);
     removePendingMessageBubble(tempId);
-    toast("تعذر إرسال الرسالة الصوتية", true);
+    if(!(err && err.code === "cloudinary/canceled")){
+      console.error(err);
+      toast("تعذر إرسال الرسالة الصوتية", true);
+    }
+  }finally{
+    voiceUploadTasks.delete(tempId);
   }
 }
 
@@ -6463,6 +6533,57 @@ async function sendImageFile(file){
   }
 }
 
+/* Same as sendImageFile, but for a video — same pending bubble, same
+   upload ring/×, same in-site lightbox on tap once it's done. */
+async function sendVideoFile(file){
+  if(!activeChatPeer || !activeChatId || !file) return;
+  const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
+  const localUrl = URL.createObjectURL(file);
+  appendPendingImageBubble(tempId, localUrl, "video");
+  try{
+    const task = uploadToCloudinary(file, {
+      folder: `videos/${activeChatId}`,
+      onProgress: (pct)=> updateUploadRingDOM(tempId, pct)
+    });
+    imageUploadTasks.set(tempId, task);
+    const data = await task.promise;
+    const url = data.secure_url;
+    markImageUploadDone(tempId, url);
+
+    const isAiChat = activeChatPeer.id === AI_PEER_ID;
+    const msgPayload = {
+      senderId: currentUser.id, type:"video", videoUrl:url, videoSize:file.size,
+      status: isAiChat ? "read" : "sent",
+      ...groupReceiptPayload(activeChatPeer),
+      ts: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
+    resolvePendingMessageBubble(tempId);
+    await db.collection("chats").doc(activeChatId).set({
+      participants: chatParticipantsFor(activeChatPeer),
+      lastMessage: "🎥 فيديو",
+      lastMessageSenderId: currentUser.id,
+      lastMessageId: tempId,
+      lastMessageDeliveredTo: [],
+      lastMessageReadBy: [],
+      lastMessageStatus: isAiChat ? "read" : "sent",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      unreadCounts: otherMembersUnreadIncrement(activeChatPeer),
+      deletedFor: firebase.firestore.FieldValue.arrayRemove(...deletedForRemoveIds(activeChatPeer))
+    }, { merge:true });
+    chatDocExistsForActive = true;
+  }catch(err){
+    removePendingMessageBubble(tempId);
+    if(!(err && err.code === "cloudinary/canceled")){
+      console.error(err);
+      toast("تعذر إرسال الفيديو", true);
+    }
+  }finally{
+    imageUploadTasks.delete(tempId);
+    URL.revokeObjectURL(localUrl);
+  }
+}
+
 async function sendGenericFile(file){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
@@ -6503,12 +6624,19 @@ async function sendGenericFile(file){
 $("#attachImageInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
-  if(file) sendImageFile(file);
+  if(!file) return;
+  if(file.type && file.type.startsWith("video/")) sendVideoFile(file);
+  else sendImageFile(file);
 });
 $("#attachFileInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
-  if(file) sendGenericFile(file);
+  if(!file) return;
+  /* Someone picking a video through the generic "ملف" button still gets
+     the proper video treatment (inline preview + player) instead of
+     landing as a plain downloadable file. */
+  if(file.type && file.type.startsWith("video/")) sendVideoFile(file);
+  else sendGenericFile(file);
 });
 
 /* =====================================================================
