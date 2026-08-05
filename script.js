@@ -423,24 +423,6 @@ function fmtTime(ts){
   return d.toLocaleTimeString("ar-EG", {hour:"2-digit", minute:"2-digit"});
 }
 
-/* "النهاردة، 2:37 ص" / "إمبارح، ..." / day name / full date — used in the
-   media-lightbox hotbar under the sender's name, same day-label logic
-   as formatLastSeen but time comes after the day instead of before. */
-function formatLightboxTime(ts){
-  if(!ts) return "";
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-  if(isNaN(d.getTime())) return "";
-  const now = new Date();
-  const timeStr = d.toLocaleTimeString("ar-EG", {hour:"numeric", minute:"2-digit"});
-  const sameDay = (a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
-  if(sameDay(d, now)) return `النهاردة، ${timeStr}`;
-  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
-  if(sameDay(d, yesterday)) return `إمبارح، ${timeStr}`;
-  const daysAgo = Math.floor((now - d) / (24*60*60*1000));
-  if(daysAgo < 7) return `يوم ${d.toLocaleDateString("ar-EG", {weekday:"long"})}، ${timeStr}`;
-  return `${d.toLocaleDateString("ar-EG", {day:"numeric", month:"long"})}، ${timeStr}`;
-}
-
 /* =====================================================================
    1) GATE — multi-challenge verification
    3 random challenge types (text code / shape order / drag piece).
@@ -2700,7 +2682,7 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
   const img = $("#memberPeekAvatarImg");
   if(img.classList.contains("hidden") || !img.src) return;
   if(window.matchMedia("(min-width:768px)").matches){
-    openLightbox(img.src, $("#memberPeekName").textContent);
+    openLightbox(img.src);
   }else{
     $("#memberPeekSheet").classList.toggle("avatar-zoomed");
   }
@@ -2719,15 +2701,11 @@ $("#memberPeekAvatarBig").addEventListener("click", ()=>{
    backdrop (no page content bleeding through), with a "⋮" menu (top
    right) to save the current picture/video straight to the device. */
 let currentLightboxSrc = "", currentLightboxKind = "image";
-/* info = optional { name, ts } shown in the mobile hotbar (name/back-
-   arrow always shown when known; the time line only appears if a ts
-   was given, since a profile photo has no message time to show). */
-function openMediaLightbox(src, kind, info){
+function openMediaLightbox(src, kind){
   if(!src) return;
   const imgEl = $("#lightboxImg"), vidEl = $("#lightboxVideo");
   currentLightboxSrc = src; currentLightboxKind = kind || "image";
   $("#lightboxMenu").classList.add("hidden");
-  $("#imageLightbox").classList.remove("controls-hidden");
   if(kind === "video"){
     imgEl.src = ""; imgEl.classList.add("hidden");
     vidEl.src = src; vidEl.classList.remove("hidden");
@@ -2737,17 +2715,11 @@ function openMediaLightbox(src, kind, info){
     vidEl.pause(); vidEl.src = ""; vidEl.classList.add("hidden");
     imgEl.src = src; imgEl.classList.remove("hidden");
   }
-  const hbName = (info && info.name) ? info.name : "";
-  const hbTimeLabel = (info && info.ts) ? formatLightboxTime(Number(info.ts)) : "";
-  $("#lightboxHotbarName").textContent = hbName || "—";
-  $("#lightboxHotbarTime").textContent = hbTimeLabel;
-  $("#lightboxHotbarTime").classList.toggle("hidden", !hbTimeLabel);
   $("#imageLightbox").classList.remove("hidden");
 }
-function openLightbox(src, name){ openMediaLightbox(src, "image", name ? { name } : null); }
+function openLightbox(src){ openMediaLightbox(src, "image"); }
 function closeLightbox(){
   $("#imageLightbox").classList.add("hidden");
-  $("#imageLightbox").classList.remove("controls-hidden");
   $("#lightboxMenu").classList.add("hidden");
   const vidEl = $("#lightboxVideo");
   vidEl.pause(); vidEl.src = "";
@@ -2764,20 +2736,16 @@ function guessExtFromUrl(url, fallback){
   }catch(e){}
   return fallback;
 }
-async function saveLightboxMediaToDevice(){
-  $("#lightboxMenu").classList.add("hidden");
-  const src = currentLightboxSrc;
-  if(!src) return;
-  const kind = currentLightboxKind;
+async function saveUrlToDevice(url, filename){
+  if(!url) return;
   try{
-    const res = await fetch(src);
+    const res = await fetch(url);
     if(!res.ok) throw new Error("fetch failed");
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
-    const ext = guessExtFromUrl(src, kind === "video" ? "mp4" : "jpg");
     const a = document.createElement("a");
     a.href = blobUrl;
-    a.download = `wasla-${kind === "video" ? "فيديو" : "صورة"}-${Date.now()}.${ext}`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2788,15 +2756,46 @@ async function saveLightboxMediaToDevice(){
     /* Cross-origin fetch can fail even when a plain download link would
        work fine — fall back to just opening the direct URL so the
        person can still save it manually instead of getting stuck. */
-    window.open(src, "_blank");
+    window.open(url, "_blank");
+  }
+}
+async function saveLightboxMediaToDevice(){
+  $("#lightboxMenu").classList.add("hidden");
+  const src = currentLightboxSrc;
+  if(!src) return;
+  const kind = currentLightboxKind;
+  const ext = guessExtFromUrl(src, kind === "video" ? "mp4" : "jpg");
+  await saveUrlToDevice(src, `wasla-${kind === "video" ? "فيديو" : "صورة"}-${Date.now()}.${ext}`);
+}
+/* saves the media attached to a message (image/video/voice/file) to the
+   device — used by the "save" action in the message context menu and
+   the phone selection-mode "more" menu, wherever "copy" wouldn't make
+   sense because there's no text to copy */
+function saveMessageMedia(m){
+  if(!m) return;
+  if(m.type === "image"){
+    const url = m.imageUrl || "";
+    if(!url) return;
+    saveUrlToDevice(url, `wasla-صورة-${Date.now()}.${guessExtFromUrl(url, "jpg")}`);
+  } else if(m.type === "video"){
+    const url = m.videoUrl || "";
+    if(!url) return;
+    saveUrlToDevice(url, `wasla-فيديو-${Date.now()}.${guessExtFromUrl(url, "mp4")}`);
+  } else if(m.type === "voice"){
+    const url = m.audioUrl || "";
+    if(!url) return;
+    saveUrlToDevice(url, `wasla-رسالة صوتية-${Date.now()}.${guessExtFromUrl(url, "mp3")}`);
+  } else if(m.type === "file"){
+    const url = m.fileUrl || "";
+    if(!url) return;
+    saveUrlToDevice(url, m.fileName || `wasla-ملف-${Date.now()}`);
   }
 }
 $("#peerProfileAvatarBig").addEventListener("click", ()=>{
   const img = $("#peerProfileAvatarImg");
-  if(!img.classList.contains("hidden") && img.src) openLightbox(img.src, $("#peerProfileName").textContent);
+  if(!img.classList.contains("hidden") && img.src) openLightbox(img.src);
 });
 $("#closeLightbox").addEventListener("click", closeLightbox);
-$("#lightboxHotbarBack").addEventListener("click", closeLightbox);
 $("#lightboxMenuBtn").addEventListener("click", (e)=>{
   e.stopPropagation();
   $("#lightboxMenu").classList.toggle("hidden");
@@ -2805,20 +2804,11 @@ $("#lightboxSaveBtn").addEventListener("click", (e)=>{
   e.stopPropagation();
   saveLightboxMediaToDevice();
 });
-/* Tapping the empty backdrop or the picture/video itself toggles the
-   controls (the mobile hotbar, or the ×/⋮ buttons on desktop) instead
-   of closing the viewer — closing now only happens via the back
-   arrow/× button. Tapping the hotbar or the ⋮ dropdown themselves is
-   left alone so their own buttons keep working normally. */
 $("#imageLightbox").addEventListener("click", e=>{
-  if(e.target.closest(".lightbox-menu") || e.target.closest("#lightboxMenuBtn")) return;
-  if(e.target.closest("#lightboxHotbar")) return;
-  if(e.target.id === "imageLightbox" || e.target.closest(".lightbox-media")){
-    $("#imageLightbox").classList.toggle("controls-hidden");
+  if(e.target.id === "imageLightbox") closeLightbox();
+  else if(!e.target.closest(".lightbox-menu") && !e.target.closest("#lightboxMenuBtn")){
     $("#lightboxMenu").classList.add("hidden");
-    return;
   }
-  $("#lightboxMenu").classList.add("hidden");
 });
 
 /* =====================================================================
@@ -2837,6 +2827,36 @@ const CHECK_SMALL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 const POLL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>`;
 const DOWNLOAD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`;
 const IMG_CLOSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+/* icons used in reply-quote / reply-preview / pinned-banner snippets when
+   the referenced message is a photo or a video, mirroring how the poll
+   icon is used next to a poll snippet */
+const IMAGE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="1.8"/><path d="m21 15-4.3-4.3a2 2 0 0 0-2.8 0L9 15"/></svg>`;
+const VIDEO_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8.5-6 3.5 6 3.5v-7Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>`;
+
+/* turns a Cloudinary video URL into a still-frame jpg (offset 0) so a
+   reply/pin snippet for a video can show a thumbnail the same way a
+   photo does, without downloading/decoding the whole clip */
+function cloudinaryVideoThumb(url){
+  if(!url) return "";
+  if(!/res\.cloudinary\.com/.test(url)) return url;
+  try{ return url.replace("/upload/", "/upload/so_0/").replace(/\.[a-zA-Z0-9]+(\?.*)?$/, ".jpg"); }
+  catch(e){ return url; }
+}
+
+/* builds the small icon + label shown for a reply/pin snippet, and the
+   thumbnail url (if any) — shared by the composer reply-preview, the
+   quoted block inside a bubble, and the pinned-message banner */
+function replySnippetIconHtml(kind){
+  if(kind === "image") return `<span class="msg-reply-media-icon">${IMAGE_ICON}</span>`;
+  if(kind === "video") return `<span class="msg-reply-media-icon">${VIDEO_ICON}</span>`;
+  if(kind === "poll") return `<span class="msg-reply-poll-icon">${POLL_ICON}</span>`;
+  return "";
+}
+function replySnippetThumbHtml(mediaUrl, kind, extraClass){
+  if(!mediaUrl) return "";
+  const src = kind === "video" ? cloudinaryVideoThumb(mediaUrl) : mediaUrl;
+  return `<div class="${extraClass||"msg-reply-quote-thumb"}"><img src="${escapeHtml(src)}" alt="" loading="lazy"></div>`;
+}
 /* human-readable file size, e.g. 1536 -> "1.5 KB" */
 function fmtFileSize(bytes){
   if(!bytes) return "0 KB";
@@ -2920,16 +2940,6 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
 const imageBlobCache = new Map();     // msg doc id -> blob: URL (or the original URL as a no-progress fallback)
 const imageDownloadState = new Map(); // msg doc id -> { progress, controller }
 
-/* who/when to show in the lightbox hotbar once this picture/video is
-   opened full-screen — "انت" for my own sends, otherwise the sender's
-   name (looked up per group member in a group chat, or just the peer
-   in a 1:1 chat), plus the message's own timestamp. */
-function lightboxSenderLabel(m){
-  if(!m) return "";
-  if(m.senderId === currentUser.id) return "انت";
-  if(activeChatPeer && activeChatPeer.isGroup) return groupMemberInfo(m.senderId).name || "عضو";
-  return activeChatPeer ? peerDisplayName(activeChatPeer) : "";
-}
 function imageBubbleHTML(m, docId, kind){
   kind = kind || "image";
   const mediaUrl = kind === "video" ? (m.videoUrl || "") : (m.imageUrl || "");
@@ -2941,9 +2951,7 @@ function imageBubbleHTML(m, docId, kind){
   const mediaTag = kind === "video"
     ? `<video class="msg-image-img${state === "done" ? "" : " hidden"}" ${state === "done" ? `src="${escapeHtml(cachedUrl)}"` : ""} muted playsinline></video><span class="msg-video-play">${VOICE_PLAY_ICON}</span>`
     : `<img class="msg-image-img${state === "done" ? "" : " hidden"}" src="${state === "done" ? escapeHtml(cachedUrl) : ""}" alt="صورة">`;
-  const senderLabel = lightboxSenderLabel(m);
-  const tsMillis = m.ts ? (m.ts.toMillis ? m.ts.toMillis() : new Date(m.ts).getTime()) : "";
-  return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}" data-sender="${escapeHtml(senderLabel)}" data-ts="${tsMillis}">
+  return `<div class="msg-image" data-kind="${kind}" data-state="${state}" data-msgid="${escapeHtml(docId)}" data-url="${escapeHtml(mediaUrl)}">
     <div class="msg-image-ph"></div>
     ${mediaTag}
     <div class="msg-image-overlay">
@@ -3583,8 +3591,10 @@ async function openChat(peer){
           if(m.replyTo){
             const quotedIsMine = m.replyTo.senderId === currentUser.id;
             const quotedName = quotedIsMine ? "انت" : (activeChatPeer && activeChatPeer.isGroup ? (groupMemberInfo(m.replyTo.senderId).name || "") : (activeChatPeer ? peerDisplayName(activeChatPeer) : ""));
-            const quotedIcon = m.replyTo.isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "";
-            inner += `<div class="msg-reply-quote" data-goto="${m.replyTo.id}"><strong>${escapeHtml(quotedName)}</strong><span>${quotedIcon}${escapeHtml(m.replyTo.text || "")}</span></div>`;
+            const quotedKind = m.replyTo.isPoll ? "poll" : m.replyTo.isImage ? "image" : m.replyTo.isVideo ? "video" : "";
+            const quotedIcon = replySnippetIconHtml(quotedKind);
+            const quotedThumb = replySnippetThumbHtml(m.replyTo.mediaUrl, quotedKind);
+            inner += `<div class="msg-reply-quote${quotedThumb ? " has-thumb" : ""}" data-goto="${m.replyTo.id}"><div class="msg-reply-quote-body"><strong>${escapeHtml(quotedName)}</strong><span>${quotedIcon}${escapeHtml(m.replyTo.text || "")}</span></div>${quotedThumb}</div>`;
           }
           if(m.type === "voice"){
             inner += `<div class="msg-voice" data-duration="${m.duration||0}">
@@ -3594,8 +3604,10 @@ async function openChat(peer){
             </div>`;
           } else if(m.type === "image"){
             inner += imageBubbleHTML(m, doc.id);
+            if(m.caption) inner += `<span class="msg-image-caption">${escapeHtml(m.caption)}</span>`;
           } else if(m.type === "video"){
             inner += imageBubbleHTML(m, doc.id, "video");
+            if(m.caption) inner += `<span class="msg-image-caption">${escapeHtml(m.caption)}</span>`;
           } else if(m.type === "file"){
             inner += `<div class="msg-file" data-url="${escapeHtml(m.fileUrl||"")}">
               <span class="msg-file-icon">${FILE_ICON}</span>
@@ -3604,6 +3616,7 @@ async function openChat(peer){
                 <span class="msg-file-size">${fmtFileSize(m.fileSize||0)}</span>
               </div>
             </div>`;
+            if(m.caption) inner += `<span class="msg-image-caption">${escapeHtml(m.caption)}</span>`;
           } else if(m.type === "poll"){
             inner += pollBubbleHTML(m, doc.id);
           } else {
@@ -4336,7 +4349,10 @@ function renderPinnedBanner(chatData){
     currentPinnedId = null;
     pinnedFocusIndex = 0;
     banner.classList.add("hidden");
+    banner.classList.remove("has-thumb");
     textEl.textContent = "";
+    const pinnedThumbElEmpty = $("#pinnedBannerThumb");
+    if(pinnedThumbElEmpty){ pinnedThumbElEmpty.innerHTML = ""; pinnedThumbElEmpty.classList.add("hidden"); }
     if(dashesEl){ dashesEl.innerHTML = ""; dashesEl.classList.add("hidden"); }
     return;
   }
@@ -4344,7 +4360,14 @@ function renderPinnedBanner(chatData){
   if(pinnedFocusIndex >= live.length) pinnedFocusIndex = 0;
   const current = live[pinnedFocusIndex];
   currentPinnedId = current.id;
-  textEl.innerHTML = (current.isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "") + escapeHtml(current.text || "");
+  const pinnedKind = current.isPoll ? "poll" : current.isImage ? "image" : current.isVideo ? "video" : "";
+  textEl.innerHTML = replySnippetIconHtml(pinnedKind) + escapeHtml(current.text || "");
+  const pinnedThumbEl = $("#pinnedBannerThumb");
+  if(pinnedThumbEl){
+    pinnedThumbEl.innerHTML = replySnippetThumbHtml(current.mediaUrl, pinnedKind, "pinned-banner-thumb-img");
+    pinnedThumbEl.classList.toggle("hidden", !current.mediaUrl);
+  }
+  banner.classList.toggle("has-thumb", !!current.mediaUrl);
   banner.classList.remove("hidden");
 
   if(dashesEl){
@@ -4503,10 +4526,14 @@ async function togglePin(id, m, durationMs){
         toast(`متقدرش تثبت أكتر من ${MAX_PINNED_MESSAGES} رسائل، شيل واحدة الأول`, true);
         return;
       }
+      const pinIsImage = m.type === "image", pinIsVideo = m.type === "video";
       list.push({
         id,
-        text: (m.type === "poll" ? ((m.poll && m.poll.question) || "") : (m.text || "")).slice(0,140),
+        text: (m.type === "poll" ? ((m.poll && m.poll.question) || "") : pinIsImage ? "صورة" : pinIsVideo ? "فيديو" : (m.text || "")).slice(0,140),
         isPoll: m.type === "poll",
+        isImage: pinIsImage,
+        isVideo: pinIsVideo,
+        mediaUrl: pinIsImage ? (m.imageUrl || null) : pinIsVideo ? (m.videoUrl || null) : null,
         senderId: m.senderId,
         pinnedUntil: now + (durationMs || 604800000)
       });
@@ -4552,18 +4579,34 @@ function setReplyTo(id){
   }
   const isOut = m.senderId === currentUser.id;
   const isPoll = m.type === "poll";
-  const previewText = isPoll ? ((m.poll && m.poll.question) || "") : (m.text || "").slice(0,300);
-  replyingTo = { id, senderId: m.senderId, text: previewText, isPoll };
+  const isImage = m.type === "image";
+  const isVideo = m.type === "video";
+  const mediaUrl = isImage ? (m.imageUrl || "") : isVideo ? (m.videoUrl || "") : "";
+  const previewText = isPoll ? ((m.poll && m.poll.question) || "")
+    : isImage ? "صورة"
+    : isVideo ? "فيديو"
+    : (m.text || "").slice(0,300);
+  const kind = isPoll ? "poll" : isImage ? "image" : isVideo ? "video" : "";
+  replyingTo = { id, senderId: m.senderId, text: previewText, isPoll, isImage, isVideo, mediaUrl };
   $("#replyPreviewName").textContent = isOut ? "انت" : (activeChatPeer ? peerDisplayName(activeChatPeer) : "");
-  $("#replyPreviewText").innerHTML = (isPoll ? `<span class="msg-reply-poll-icon">${POLL_ICON}</span>` : "") + escapeHtml(previewText);
+  $("#replyPreviewText").innerHTML = replySnippetIconHtml(kind) + escapeHtml(previewText);
+  const thumbEl = $("#replyPreviewThumb");
+  if(thumbEl){
+    thumbEl.innerHTML = replySnippetThumbHtml(mediaUrl, kind, "reply-preview-thumb-img");
+    thumbEl.classList.toggle("hidden", !mediaUrl);
+  }
+  $("#replyPreview").classList.toggle("has-thumb", !!mediaUrl);
   $("#replyPreview").classList.remove("hidden");
   $("#messageInput").focus();
 }
 function clearReplyState(){
   replyingTo = null;
   $("#replyPreview").classList.add("hidden");
+  $("#replyPreview").classList.remove("has-thumb");
   $("#replyPreviewName").textContent = "";
   $("#replyPreviewText").innerHTML = "";
+  const thumbEl = $("#replyPreviewThumb");
+  if(thumbEl){ thumbEl.innerHTML = ""; thumbEl.classList.add("hidden"); }
 }
 $("#cancelReplyBtn").addEventListener("click", clearReplyState);
 
@@ -5081,8 +5124,12 @@ function openMsgMenu(id, x, y){
   contextMenuMsgId = id;
   const menu = $("#msgMenu");
   const isDeleted = !!m.deletedForEveryone;
+  const isMedia = m.type === "image" || m.type === "video" || m.type === "voice" || m.type === "file";
+  const hasCaption = isMedia && !!(m.caption && m.caption.trim());
   $("#msgMenuReply").classList.toggle("hidden", isDeleted);
-  $("#msgMenuCopy").classList.toggle("hidden", isDeleted);
+  $("#msgMenuCopy").classList.toggle("hidden", isDeleted || (isMedia && !hasCaption));
+  const saveBtn = $("#msgMenuSave");
+  if(saveBtn) saveBtn.classList.toggle("hidden", isDeleted || !isMedia);
   $("#msgMenuPin").classList.toggle("hidden", isDeleted);
   const canEdit = canEditMessage(m);
   $("#msgMenuEdit").classList.toggle("hidden", !canEdit);
@@ -5166,7 +5213,9 @@ $("#msgMenu").addEventListener("click", async (e)=>{
   if(action === "reply"){
     setReplyTo(id);
   } else if(action === "copy"){
-    copyText(m.text || "").then(()=> toast("تم نسخ الرسالة")).catch(()=> toast("تعذر نسخ الرسالة، انسخها يدويًا", true));
+    copyText(m.caption || m.text || "").then(()=> toast("تم نسخ الرسالة")).catch(()=> toast("تعذر نسخ الرسالة، انسخها يدويًا", true));
+  } else if(action === "save"){
+    saveMessageMedia(m);
   } else if(action === "pin"){
     if(currentPinnedIds.has(id)){
       await togglePin(id, m);
@@ -5342,6 +5391,12 @@ function openSelectionMoreMenu(){
   if(pinLabel) pinLabel.textContent = isPinned ? "إلغاء التثبيت" : "تثبيت";
   const canEdit = canEditMessage(m);
   $("#selectionMoreEdit").classList.toggle("hidden", !canEdit);
+  const isMedia = m.type === "image" || m.type === "video" || m.type === "voice" || m.type === "file";
+  const hasCaption = isMedia && !!(m.caption && m.caption.trim());
+  const copyBtn = $("#selectionMoreCopy");
+  const saveMoreBtn = $("#selectionMoreSave");
+  if(copyBtn) copyBtn.classList.toggle("hidden", isMedia && !hasCaption);
+  if(saveMoreBtn) saveMoreBtn.classList.toggle("hidden", !isMedia);
   menu.classList.remove("hidden");
   const btn = $("#selectionMoreBtn");
   const rect = btn.getBoundingClientRect();
@@ -5377,7 +5432,10 @@ $("#selectionMoreMenu").addEventListener("click", async (e)=>{
   closeSelectionMoreMenu();
   if(!m) return;
   if(action === "copy"){
-    copyText(m.text || "").then(()=> toast("تم نسخ الرسالة")).catch(()=> toast("تعذر نسخ الرسالة، انسخها يدويًا", true));
+    copyText(m.caption || m.text || "").then(()=> toast("تم نسخ الرسالة")).catch(()=> toast("تعذر نسخ الرسالة، انسخها يدويًا", true));
+    exitSelectionMode();
+  } else if(action === "save"){
+    saveMessageMedia(m);
     exitSelectionMode();
   } else if(action === "edit"){
     exitSelectionMode();
@@ -5889,7 +5947,10 @@ function appendPendingMessageBubble(tempId, text, replySnapshot){
   bubble.dataset.id = tempId;
   let inner = "";
   if(replySnapshot){
-    inner += `<div class="msg-reply-quote"><strong>انت</strong><span>${escapeHtml(replySnapshot.text || "")}</span></div>`;
+    const snapKind = replySnapshot.isPoll ? "poll" : replySnapshot.isImage ? "image" : replySnapshot.isVideo ? "video" : "";
+    const snapIcon = replySnippetIconHtml(snapKind);
+    const snapThumb = replySnippetThumbHtml(replySnapshot.mediaUrl, snapKind);
+    inner += `<div class="msg-reply-quote${snapThumb ? " has-thumb" : ""}"><div class="msg-reply-quote-body"><strong>انت</strong><span>${snapIcon}${escapeHtml(replySnapshot.text || "")}</span></div>${snapThumb}</div>`;
   }
   inner += `<span class="msg-text">${escapeHtml(text)}</span>`;
   inner += `<span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
@@ -5983,7 +6044,7 @@ $("#messages").addEventListener("click", (e)=>{
    progress, then this bubble stays on screen exactly as-is (ring gone)
    until the messages listener swaps it for the real, synced bubble. */
 const imageUploadTasks = new Map(); // tempId -> Cloudinary upload task, so the × can cancel it
-function appendPendingImageBubble(tempId, localUrl, kind){
+function appendPendingImageBubble(tempId, localUrl, kind, caption){
   kind = kind || "image";
   const msgsBox = $("#messages");
   const bubble = document.createElement("div");
@@ -6005,6 +6066,7 @@ function appendPendingImageBubble(tempId, localUrl, kind){
         </div>
       </div>
     </div>
+    ${caption ? `<span class="msg-image-caption">${escapeHtml(caption)}</span>` : ""}
     <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
   msgsBox.appendChild(bubble);
   pendingBubbleNodes.set(tempId, bubble);
@@ -6032,7 +6094,7 @@ function cancelImageUpload(tempId){
 
 /* Same idea, for a generic file upload — shows the name/size right away
    with a subtle "uploading" dim. */
-function appendPendingFileBubble(tempId, fileName, fileSize){
+function appendPendingFileBubble(tempId, fileName, fileSize, caption){
   const msgsBox = $("#messages");
   const bubble = document.createElement("div");
   bubble.className = "msg out pending";
@@ -6045,6 +6107,7 @@ function appendPendingFileBubble(tempId, fileName, fileSize){
         <span class="msg-file-size">${fmtFileSize(fileSize)}</span>
       </div>
     </div>
+    ${caption ? `<span class="msg-image-caption">${escapeHtml(caption)}</span>` : ""}
     <span class="msg-meta"><time>${fmtTime(new Date())}</time><span class="msg-ticks">${TICK_SINGLE}</span></span>`;
   msgsBox.appendChild(bubble);
   pendingBubbleNodes.set(tempId, bubble);
@@ -6129,10 +6192,7 @@ $("#messages").addEventListener("click", (e)=>{
   }
   const imgWrap = e.target.closest(".msg-image");
   if(imgWrap && imgWrap.dataset.state === "done" && imgWrap.dataset.url){
-    openMediaLightbox(imgWrap.dataset.url, imgWrap.dataset.kind || "image", {
-      name: imgWrap.dataset.sender || "",
-      ts: imgWrap.dataset.ts || ""
-    });
+    openMediaLightbox(imgWrap.dataset.url, imgWrap.dataset.kind || "image");
     return;
   }
   const fileWrap = e.target.closest(".msg-file");
@@ -6592,11 +6652,11 @@ $("#closePollVotersBtn").addEventListener("click", ()=>{
   currentVotersMsgId = null;
 });
 
-async function sendImageFile(file){
+async function sendImageFile(file, caption){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   const localUrl = URL.createObjectURL(file);
-  appendPendingImageBubble(tempId, localUrl);
+  appendPendingImageBubble(tempId, localUrl, "image", caption);
   try{
     const task = uploadToCloudinary(file, {
       folder: `images/${activeChatId}`,
@@ -6611,6 +6671,7 @@ async function sendImageFile(file){
     const msgPayload = {
       senderId: currentUser.id, type:"image", imageUrl:url, imageSize:file.size,
       status: isAiChat ? "read" : "sent",
+      ...(caption ? { caption } : {}),
       ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -6618,7 +6679,7 @@ async function sendImageFile(file){
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants: chatParticipantsFor(activeChatPeer),
-      lastMessage: "📷 صورة",
+      lastMessage: caption ? `📷 ${caption}` : "📷 صورة",
       lastMessageSenderId: currentUser.id,
       lastMessageId: tempId,
       lastMessageDeliveredTo: [],
@@ -6643,11 +6704,11 @@ async function sendImageFile(file){
 
 /* Same as sendImageFile, but for a video — same pending bubble, same
    upload ring/×, same in-site lightbox on tap once it's done. */
-async function sendVideoFile(file){
+async function sendVideoFile(file, caption){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
   const localUrl = URL.createObjectURL(file);
-  appendPendingImageBubble(tempId, localUrl, "video");
+  appendPendingImageBubble(tempId, localUrl, "video", caption);
   try{
     const task = uploadToCloudinary(file, {
       folder: `videos/${activeChatId}`,
@@ -6662,6 +6723,7 @@ async function sendVideoFile(file){
     const msgPayload = {
       senderId: currentUser.id, type:"video", videoUrl:url, videoSize:file.size,
       status: isAiChat ? "read" : "sent",
+      ...(caption ? { caption } : {}),
       ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -6669,7 +6731,7 @@ async function sendVideoFile(file){
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants: chatParticipantsFor(activeChatPeer),
-      lastMessage: "🎥 فيديو",
+      lastMessage: caption ? `🎥 ${caption}` : "🎥 فيديو",
       lastMessageSenderId: currentUser.id,
       lastMessageId: tempId,
       lastMessageDeliveredTo: [],
@@ -6692,10 +6754,10 @@ async function sendVideoFile(file){
   }
 }
 
-async function sendGenericFile(file){
+async function sendGenericFile(file, caption){
   if(!activeChatPeer || !activeChatId || !file) return;
   const tempId = db.collection("chats").doc(activeChatId).collection("messages").doc().id;
-  appendPendingFileBubble(tempId, file.name, file.size);
+  appendPendingFileBubble(tempId, file.name, file.size, caption);
   try{
     const data = await uploadToCloudinary(file, { folder: `files/${activeChatId}` }).promise;
     const url = data.secure_url;
@@ -6704,6 +6766,7 @@ async function sendGenericFile(file){
     const msgPayload = {
       senderId: currentUser.id, type:"file", fileUrl:url, fileName:file.name, fileSize:file.size,
       status: isAiChat ? "read" : "sent",
+      ...(caption ? { caption } : {}),
       ...groupReceiptPayload(activeChatPeer),
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -6711,7 +6774,7 @@ async function sendGenericFile(file){
     resolvePendingMessageBubble(tempId);
     await db.collection("chats").doc(activeChatId).set({
       participants: chatParticipantsFor(activeChatPeer),
-      lastMessage: "📎 " + file.name,
+      lastMessage: caption ? `📎 ${caption}` : "📎 " + file.name,
       lastMessageSenderId: currentUser.id,
       lastMessageId: tempId,
       lastMessageDeliveredTo: [],
@@ -6729,22 +6792,101 @@ async function sendGenericFile(file){
   }
 }
 
+/* =====================================================================
+   Pre-send preview overlay — a full black page shown after picking an
+   image, video, or generic file (NOT a live-recorded voice note, which
+   still sends straight away), letting the person add a caption before
+   it actually goes out. The row of edit-style icons at the top (mirrors
+   how most chat apps present this) is decorative only — no crop/HD/
+   draw/text editing is implemented — except the × (cancel) and the
+   send button, which are real.
+   ===================================================================== */
+let pendingSendFile = null;
+let pendingSendKind = "";       // "image" | "video" | "file"
+let pendingSendObjectUrl = "";
+
+function openSendPreview(file, kind){
+  pendingSendFile = file;
+  pendingSendKind = kind;
+  if(pendingSendObjectUrl){ URL.revokeObjectURL(pendingSendObjectUrl); }
+  pendingSendObjectUrl = URL.createObjectURL(file);
+
+  const mediaBox = $("#sendPreviewMedia");
+  if(kind === "image"){
+    mediaBox.innerHTML = `<img src="${pendingSendObjectUrl}" alt="">`;
+  } else if(kind === "video"){
+    mediaBox.innerHTML = `<video src="${pendingSendObjectUrl}" controls playsinline muted></video>`;
+  } else {
+    mediaBox.innerHTML = `<div class="send-preview-file">
+      <span class="send-preview-file-icon">${FILE_ICON}</span>
+      <span class="send-preview-file-name">${escapeHtml(file.name)}</span>
+      <span class="send-preview-file-size">${fmtFileSize(file.size)}</span>
+    </div>`;
+  }
+  const overlay = $("#sendPreviewOverlay");
+  /* kind-image  -> full edit toolbar (download / HD / rotate / text / draw)
+     kind-video  -> same page, no rotate icon
+     kind-file   -> no edit icons at all, just × + caption + send
+                    (an audio file arrives here as "file" too, so it gets
+                    the same bare treatment) */
+  overlay.classList.remove("kind-image", "kind-video", "kind-file");
+  overlay.classList.add(kind === "image" ? "kind-image" : kind === "video" ? "kind-video" : "kind-file");
+  $("#sendPreviewCaption").value = "";
+  overlay.classList.remove("hidden");
+  overlay.classList.remove("open");
+  /* force a reflow so the browser registers the "closed" starting state
+     before the "open" class is added — otherwise the two class changes
+     collapse into one and the page just pops in with no transition */
+  void overlay.offsetWidth;
+  requestAnimationFrame(()=> overlay.classList.add("open"));
+  setTimeout(()=> $("#sendPreviewCaption").focus(), 260);
+}
+function closeSendPreview(){
+  const overlay = $("#sendPreviewOverlay");
+  overlay.classList.remove("open");
+  setTimeout(()=>{
+    overlay.classList.add("hidden");
+    $("#sendPreviewMedia").innerHTML = "";
+  }, 220);
+  if(pendingSendObjectUrl){ URL.revokeObjectURL(pendingSendObjectUrl); pendingSendObjectUrl = ""; }
+  pendingSendFile = null;
+  pendingSendKind = "";
+  $("#sendPreviewCaption").value = "";
+}
+function confirmSendPreview(){
+  const file = pendingSendFile, kind = pendingSendKind;
+  const caption = $("#sendPreviewCaption").value.trim();
+  closeSendPreview();
+  if(!file) return;
+  if(kind === "image") sendImageFile(file, caption);
+  else if(kind === "video") sendVideoFile(file, caption);
+  else sendGenericFile(file, caption);
+}
+$("#sendPreviewCloseBtn").addEventListener("click", closeSendPreview);
+$("#sendPreviewSendBtn").addEventListener("click", confirmSendPreview);
+$("#sendPreviewCaption").addEventListener("keydown", (e)=>{
+  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); confirmSendPreview(); }
+});
+
 $("#attachImageInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
   if(!file) return;
-  if(file.type && file.type.startsWith("video/")) sendVideoFile(file);
-  else sendImageFile(file);
+  const kind = file.type && file.type.startsWith("video/") ? "video" : "image";
+  openSendPreview(file, kind);
 });
 $("#attachFileInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
   if(!file) return;
-  /* Someone picking a video through the generic "ملف" button still gets
-     the proper video treatment (inline preview + player) instead of
-     landing as a plain downloadable file. */
-  if(file.type && file.type.startsWith("video/")) sendVideoFile(file);
-  else sendGenericFile(file);
+  /* Someone picking a video or a photo through the generic "ملف" button
+     still gets the proper media treatment (inline preview + player, or
+     a real image bubble) instead of landing as a plain downloadable
+     file. */
+  let kind = "file";
+  if(file.type && file.type.startsWith("video/")) kind = "video";
+  else if(file.type && file.type.startsWith("image/")) kind = "image";
+  openSendPreview(file, kind);
 });
 
 /* =====================================================================
@@ -7264,7 +7406,11 @@ $("#composer").addEventListener("submit", async (e)=>{
       ts: firebase.firestore.FieldValue.serverTimestamp()
     };
     if(replySnapshot){
-      msgPayload.replyTo = { id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text, isPoll: !!replySnapshot.isPoll };
+      msgPayload.replyTo = {
+        id: replySnapshot.id, senderId: replySnapshot.senderId, text: replySnapshot.text,
+        isPoll: !!replySnapshot.isPoll, isImage: !!replySnapshot.isImage, isVideo: !!replySnapshot.isVideo,
+        mediaUrl: replySnapshot.mediaUrl || null
+      };
     }
     await db.collection("chats").doc(activeChatId).collection("messages").doc(tempId).set(msgPayload);
     resolvePendingMessageBubble(tempId);

@@ -969,6 +969,7 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           <strong>رسالة مثبتة:</strong>
           <span id="pinnedBannerText">—</span>
         </div>
+        <div class="pinned-banner-thumb hidden" id="pinnedBannerThumb"></div>
         <div class="pinned-banner-dashes hidden" id="pinnedBannerDashes"></div>
       </div>
 
@@ -982,6 +983,7 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
           <strong id="replyPreviewName">—</strong>
           <span id="replyPreviewText">—</span>
         </div>
+        <div class="reply-preview-thumb hidden" id="replyPreviewThumb"></div>
         <button type="button" class="icon-btn" id="cancelReplyBtn" title="إلغاء الرد">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
@@ -1598,23 +1600,44 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
       <span>حفظ في الجهاز</span>
     </button>
   </div>
+  <img id="lightboxImg" src="" alt="">
+  <video id="lightboxVideo" class="hidden" src="" controls playsinline></video>
+</div>
 
-  <!-- ---- mobile-only top bar: replaces the ×/⋮ buttons above with a
-       WhatsApp-style header (back arrow + name + time) once the screen
-       is phone-width. Only these three things ever go in here. ---- -->
-  <div class="lightbox-hotbar" id="lightboxHotbar">
-    <button type="button" class="lightbox-hotbar-back" id="lightboxHotbarBack" title="رجوع">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+<!-- ---- Pre-send preview — full black page shown after picking an
+     image/video/file, before it actually goes out. Caption box + send
+     button at the bottom; the icon row is a visual reference only
+     (mirrors what a typical chat app shows here) and isn't wired up to
+     do anything except × (cancel) and send. ---- -->
+<div class="send-preview hidden" id="sendPreviewOverlay">
+  <div class="send-preview-tools">
+    <button type="button" class="send-preview-tool send-preview-close" id="sendPreviewCloseBtn" title="إلغاء">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
-    <div class="lightbox-hotbar-info">
-      <strong id="lightboxHotbarName">—</strong>
-      <span id="lightboxHotbarTime" class="hidden"></span>
-    </div>
+    <button type="button" class="send-preview-tool" tabindex="-1" title="تنزيل">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    </button>
+    <button type="button" class="send-preview-tool" tabindex="-1" title="جودة عالية">
+      <span class="send-preview-hd">HD</span>
+    </button>
+    <button type="button" class="send-preview-tool send-preview-tool-rotate" tabindex="-1" title="تدوير">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+    </button>
+    <button type="button" class="send-preview-tool" tabindex="-1" title="نص">
+      <span class="send-preview-aa">Aa</span>
+    </button>
+    <button type="button" class="send-preview-tool" tabindex="-1" title="رسم">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+    </button>
   </div>
 
-  <div class="lightbox-media">
-    <img id="lightboxImg" src="" alt="">
-    <video id="lightboxVideo" class="hidden" src="" controls playsinline></video>
+  <div class="send-preview-media" id="sendPreviewMedia"></div>
+
+  <div class="send-preview-bottom">
+    <input type="text" id="sendPreviewCaption" placeholder="أضف تعليق..." autocomplete="off">
+    <button type="button" class="send-preview-send-btn" id="sendPreviewSendBtn" title="إرسال">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>
+    </button>
   </div>
 </div>
 
@@ -1627,6 +1650,10 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
   <button type="button" data-action="copy" id="msgMenuCopy">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     نسخ
+  </button>
+  <button type="button" data-action="save" id="msgMenuSave">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    حفظ
   </button>
   <button type="button" data-action="edit" id="msgMenuEdit">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
@@ -1678,9 +1705,13 @@ html.wasla-verified #tsGate, html.wasla-verified #gate{ display:none !important;
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1z"/></svg>
     <span class="lbl">تثبيت</span>
   </button>
-  <button type="button" data-action="copy">
+  <button type="button" data-action="copy" id="selectionMoreCopy">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     نسخ
+  </button>
+  <button type="button" data-action="save" id="selectionMoreSave">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    حفظ
   </button>
   <button type="button" data-action="edit" id="selectionMoreEdit">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
